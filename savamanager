@@ -1,7 +1,7 @@
 local httpService = game:GetService("HttpService")
 
 local SaveManager = {} do
-	SaveManager.Folder = "SolarHub_Settings"
+	SaveManager.Folder = "FluentSettings"
 	SaveManager.Ignore = {}
 	SaveManager.AutoSaveEnabled = true
 	SaveManager.AutoSaveConfig = "AutoSave"

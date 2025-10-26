@@ -1,22 +1,40 @@
+
 local httpService = game:GetService("HttpService")
 
 local SaveManager = {} do
 	SaveManager.Folder = "FluentSettings"
 	SaveManager.Ignore = {}
 
-	-- ====== KHAI BÁO SECTION MAP (điền chỉ 1 lần) ======
-	-- Mỗi phần tử là 1 SectionName = { danh sách idx option thuộc section đó }
-	-- Bạn đã đưa 4 section và các idx → mình map sẵn như dưới.
+	-- ====== SECTION MAP (khai báo 1 lần) ======
 	SaveManager.SectionMap = {
 		["Auto Farming"] = { "AutoFish", "Fishing Spot" },
 		["Auto Selling"] = { "AutoSell", "SellMaxBag", "Sell Input" },
 		["Auto Equip"]   = { "AutoEquipBestRod", "AutoEquipBestBait" },
 		["Auto Buying"]  = { "AutoBuyRods", "AutoBuyBobbers", "SelectRods", "SelectBobbers" },
 	}
-	-- Tên cho các option không khớp map ở trên sẽ rơi vào nhóm này:
 	SaveManager.FallbackSection = "Others"
 
-	-- Tạo reverse map: idx → section
+	-- Alias để map tên hiển thị → idx option
+	SaveManager.OptionAlias = {
+		["Auto Fish"] = "AutoFish",
+		["Fishing Spot"] = "Fishing Spot",
+		["Sell Input"] = "Sell Input",
+		["Auto Sell"] = "AutoSell",
+		["Sell Max Bag"] = "SellMaxBag",
+		["Auto Equip Best Rod"] = "AutoEquipBestRod",
+		["Auto Equip Best Bait"] = "AutoEquipBestBait",
+		["Auto Buy Rods"] = "AutoBuyRods",
+		["Auto Buy Bobbers"] = "AutoBuyBobbers",
+		["Select Rods"] = "SelectRods",
+		["Select Bobbers"] = "SelectBobbers",
+	}
+
+	function SaveManager:_norm(s)
+		s = tostring(s or "")
+		s = s:gsub("[%s_%-]+",""):lower()
+		return s
+	end
+
 	function SaveManager:_BuildReverseSectionMap()
 		self.OptionSection = {}
 		for section, list in pairs(self.SectionMap) do
@@ -44,7 +62,7 @@ local SaveManager = {} do
 		end)
 	end
 
-	-- Gắn hook để bất kỳ SetValue/SetValueRGB đều autosave
+	-- Hook mọi option để autosave khi SetValue/SetValueRGB được gọi
 	function SaveManager:_HookOption(idx, option)
 		local function wrap(method)
 			if type(option[method]) ~= "function" then return end
@@ -146,42 +164,120 @@ local SaveManager = {} do
 		self:BuildFolderTree()
 	end
 
-	-- ===== Lưu THEO SECTION =====
+	-- ===== LƯU THEO SECTION =====
 	function SaveManager:Save(name)
 		if (not name) then
 			return false, "no config file is selected"
 		end
 
 		local fullPath = self.Folder .. "/settings/" .. name .. ".json"
-
-		-- data.sections[SectionName] = { objects = { ... } }
 		local data = { sections = {} }
 
 		for idx, option in next, SaveManager.Options do
 			if not self.Parser[option.Type] then continue end
 			if self.Ignore[idx] then continue end
-
 			local section = self.OptionSection[idx] or self.FallbackSection
 			data.sections[section] = data.sections[section] or { objects = {} }
 			table.insert(data.sections[section].objects, self.Parser[option.Type].Save(idx, option))
 		end
 
 		local ok, encoded = pcall(httpService.JSONEncode, httpService, data)
-		if not ok then
-			return false, "failed to encode data"
-		end
-
+		if not ok then return false, "failed to encode data" end
 		writefile(fullPath, encoded)
 		self._lastSaveTick = os.clock()
 		return true
 	end
 
-	-- ===== Tải THEO SECTION (tương thích ngược với dạng cũ) =====
-	function SaveManager:Load(name)
-		if (not name) then
-			return false, "no config file is selected"
+	-- ===== HỖ TRỢ: đọc autosave.json (dạng mới/ cũ) =====
+	function SaveManager:_ReadAutosaveObjects()
+		local file = self.Folder .. "/settings/" .. self.AUTOSAVE_NAME .. ".json"
+		if not isfile(file) then return {} end
+		local ok, decoded = pcall(httpService.JSONDecode, httpService, readfile(file))
+		if not ok or type(decoded) ~= "table" then return {} end
+
+		local objects = {}
+		if decoded.sections then
+			for _, pack in pairs(decoded.sections) do
+				if pack and type(pack.objects) == "table" then
+					for _, obj in ipairs(pack.objects) do table.insert(objects, obj) end
+				end
+			end
+		elseif decoded.objects then
+			for _, obj in ipairs(decoded.objects) do table.insert(objects, obj) end
+		end
+		return objects
+	end
+
+	-- ===== GIẢI QUYẾT TÊN → IDX =====
+	function SaveManager:_resolveIdx(sectionName, keyName)
+		if not keyName then return nil end
+		-- 1) alias thẳng
+		local alias = self.OptionAlias[keyName]
+		if alias and self.Options[alias] then return alias end
+
+		-- 2) thử theo SectionMap
+		local list = self.SectionMap[sectionName]
+		if list then
+			for _, idx in ipairs(list) do
+				if self:_norm(idx) == self:_norm(keyName) then
+					if self.Options[idx] then return idx end
+				end
+			end
 		end
 
+		-- 3) dò toàn bộ options theo tên gần đúng
+		local keyN = self:_norm(keyName)
+		for idx, _ in pairs(self.Options or {}) do
+			if self:_norm(idx) == keyN then
+				return idx
+			end
+		end
+
+		-- 4) cuối cùng thử alias hóa (loại bỏ space/underscore)
+		for display, realIdx in pairs(self.OptionAlias) do
+			if self:_norm(display) == keyN and self.Options[realIdx] then
+				return realIdx
+			end
+		end
+
+		return nil
+	end
+
+	-- ===== ÁP BẢNG (sectioned) VÀO OPTIONS
+	-- cfg = { ["Auto Farming"] = { ["Auto Fish"]=true, ["Fishing Spot"]="None" }, ... }
+	-- overwrite=true: ghi đè; false: chỉ set nếu chưa có giá trị/không có trong existedKeys
+	function SaveManager:ApplyConfigTable(cfg, overwrite, existedKeys)
+		if type(cfg) ~= "table" then return end
+		for section, kv in pairs(cfg) do
+			if type(kv) == "table" then
+				for key, val in pairs(kv) do
+					local idx = self:_resolveIdx(section, key)
+					if idx and self.Options[idx] then
+						local already = existedKeys and existedKeys[idx] or false
+						if overwrite or not already then
+							local opt = self.Options[idx]
+							-- cố gắng set theo loại option
+							if opt.Type == "Toggle" or opt.Type == "Keybind" or opt.Type == "Slider" or opt.Type == "Input" then
+								opt:SetValue(val)
+							elseif opt.Type == "Dropdown" then
+								-- hỗ trợ chuỗi, bảng (multi)
+                                opt:SetValue(val)
+							elseif opt.Type == "Colorpicker" and typeof(val) == "Color3" then
+								opt:SetValueRGB(val, opt.Transparency)
+							else
+								-- fallback
+								pcall(function() opt:SetValue(val) end)
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- ===== TẢI THEO SECTION (tương thích ngược) =====
+	function SaveManager:Load(name)
+		if (not name) then return false, "no config file is selected" end
 		local file = self.Folder .. "/settings/" .. name .. ".json"
 		if not isfile(file) then return false, "invalid file" end
 
@@ -189,8 +285,6 @@ local SaveManager = {} do
 		if not success then return false, "decode error" end
 
 		self._loading = true
-
-		-- Dạng mới: { sections = { ["Auto Selling"] = { objects = {...} }, ... } }
 		if decoded.sections and type(decoded.sections) == "table" then
 			for _, pack in pairs(decoded.sections) do
 				if pack and type(pack.objects) == "table" then
@@ -201,8 +295,6 @@ local SaveManager = {} do
 					end
 				end
 			end
-
-		-- Dạng cũ (flat): { objects = { ... } }
 		elseif decoded.objects and type(decoded.objects) == "table" then
 			for _, option in next, decoded.objects do
 				if self.Parser[option.type] then
@@ -210,9 +302,60 @@ local SaveManager = {} do
 				end
 			end
 		end
-
 		task.delay(0.2, function() self._loading = false end)
 		return true
+	end
+
+	-- ===== ƯU TIÊN getgenv().Config TRƯỚC autosave =====
+	-- preferGetgenv=true: 1) áp getgenv().Config (overwrite), 2) ghép phần thiếu từ autosave (overwrite=false)
+	-- preferGetgenv=false: 1) autosave trước, 2) getgenv().Config chỉ ghi đè những key có trong config (overwrite=true)
+	function SaveManager:LoadWithPriority(preferGetgenv)
+		self._loading = true
+
+		-- đánh dấu các key đã được set từ bước 1 để bước 2 không ghi đè (nếu cần)
+		local setKeys = {}
+
+		local function markSetFromConfig(cfg)
+			if type(cfg) ~= "table" then return end
+			for section, kv in pairs(cfg) do
+				if type(kv) == "table" then
+					for key, _ in pairs(kv) do
+						local idx = self:_resolveIdx(section, key)
+						if idx then setKeys[idx] = true end
+					end
+				end
+			end
+		end
+
+		local userCfg = rawget(getgenv(), "Config")
+
+		if preferGetgenv and type(userCfg) == "table" then
+			-- B1: áp config người dùng
+			self:ApplyConfigTable(userCfg, true, nil)
+			markSetFromConfig(userCfg)
+			-- B2: ghép phần thiếu từ autosave
+			local autoObjs = self:_ReadAutosaveObjects()
+			for _, option in ipairs(autoObjs) do
+				if self.Parser[option.type] and not setKeys[option.idx] then
+					task.spawn(function() self.Parser[option.type].Load(option.idx, option) end)
+				end
+			end
+		else
+			-- B1: autosave trước
+			local autoObjs = self:_ReadAutosaveObjects()
+			for _, option in ipairs(autoObjs) do
+				if self.Parser[option.type] then
+					task.spawn(function() self.Parser[option.type].Load(option.idx, option) end)
+					setKeys[option.idx] = true
+				end
+			end
+			-- B2: nếu có config user thì cho phép ghi đè
+			if type(userCfg) == "table" then
+				self:ApplyConfigTable(userCfg, true, setKeys)
+			end
+		end
+
+		task.delay(0.2, function() self._loading = false end)
 	end
 
 	function SaveManager:IgnoreThemeSettings()
@@ -251,8 +394,8 @@ local SaveManager = {} do
 	function SaveManager:SetLibrary(library)
 		self.Library = library
 		self.Options = library.Options
-		self:_HookAllOptions()        -- bật autosave
-		self:_BuildReverseSectionMap()-- đảm bảo map đã sẵn sàng
+		self:_HookAllOptions()
+		self:_BuildReverseSectionMap()
 	end
 
 	function SaveManager:LoadAutoloadConfig()
@@ -276,41 +419,37 @@ local SaveManager = {} do
 		end
 	end
 
+	-- (UI quản lý config có thể bỏ nếu không cần)
 	function SaveManager:BuildConfigSection(tab)
 		assert(self.Library, "Must set SaveManager.Library")
-
 		local section = tab:AddSection("Configuration")
-
 		section:AddInput("SaveManager_ConfigName",    { Title = "Config name" })
 		section:AddDropdown("SaveManager_ConfigList", { Title = "Config list", Values = self:RefreshConfigList(), AllowNull = true })
 
-		section:AddButton({
-			Title = "Create config",
-			Callback = function()
-				local name = SaveManager.Options.SaveManager_ConfigName.Value
-				if name:gsub(" ", "") == "" then 
-					return self.Library:Notify({
-						Title = "Interface", Content = "Config loader",
-						SubContent = "Invalid config name (empty)", Duration = 7
-					})
-				end
-				local ok, err = self:Save(name)
-				if not ok then
-					return self.Library:Notify({
-						Title = "Interface", Content = "Config loader",
-						SubContent = "Failed to save config: " .. err, Duration = 7
-					})
-				end
-				self.Library:Notify({
+		section:AddButton({ Title = "Create config", Callback = function()
+			local name = SaveManager.Options.SaveManager_ConfigName.Value
+			if name:gsub(" ", "") == "" then 
+				return self.Library:Notify({
 					Title = "Interface", Content = "Config loader",
-					SubContent = string.format("Created config %q", name), Duration = 7
+					SubContent = "Invalid config name (empty)", Duration = 7
 				})
-				SaveManager.Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
-				SaveManager.Options.SaveManager_ConfigList:SetValue(nil)
 			end
-		})
+			local ok, err = self:Save(name)
+			if not ok then
+				return self.Library:Notify({
+					Title = "Interface", Content = "Config loader",
+					SubContent = "Failed to save config: " .. err, Duration = 7
+				})
+			end
+			self.Library:Notify({
+				Title = "Interface", Content = "Config loader",
+				SubContent = string.format("Created config %q", name), Duration = 7
+			})
+			SaveManager.Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
+			SaveManager.Options.SaveManager_ConfigList:SetValue(nil)
+		end})
 
-		section:AddButton({Title = "Load config", Callback = function()
+		section:AddButton({ Title = "Load config", Callback = function()
 			local name = SaveManager.Options.SaveManager_ConfigList.Value
 			local ok, err = self:Load(name)
 			if not ok then
@@ -325,7 +464,7 @@ local SaveManager = {} do
 			})
 		end})
 
-		section:AddButton({Title = "Overwrite config", Callback = function()
+		section:AddButton({ Title = "Overwrite config", Callback = function()
 			local name = SaveManager.Options.SaveManager_ConfigList.Value
 			local ok, err = self:Save(name)
 			if not ok then
@@ -340,13 +479,13 @@ local SaveManager = {} do
 			})
 		end})
 
-		section:AddButton({Title = "Refresh list", Callback = function()
+		section:AddButton({ Title = "Refresh list", Callback = function()
 			SaveManager.Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
 			SaveManager.Options.SaveManager_ConfigList:SetValue(nil)
 		end})
 
 		local AutoloadButton
-		AutoloadButton = section:AddButton({Title = "Set as autoload", Description = "Current autoload config: none", Callback = function()
+		AutoloadButton = section:AddButton({ Title = "Set as autoload", Description = "Current autoload config: none", Callback = function()
 			local name = SaveManager.Options.SaveManager_ConfigList.Value
 			writefile(self.Folder .. "/settings/autoload.txt", name)
 			AutoloadButton:SetDesc("Current autoload config: " .. name)

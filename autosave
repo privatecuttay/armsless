@@ -174,30 +174,52 @@ return function(SaveManager)
     end
 
     local path = folder.."/"..AUTOSAVE..".lua"
-    task.defer(function()
-        local used_runtime = false
-        local runtime_cfg = rawget(getgenv(), "Config")
+    local function __count_keys(t)
+    local n=0; for _ in pairs(t or {}) do n=n+1 end; return n
+end
 
-        -- 1️⃣ Nếu có Config runtime → áp ngay
-        if type(runtime_cfg) == "table" then
-            used_runtime = __apply_runtime_config(runtime_cfg)
+task.defer(function()
+    local used_runtime = false
+    local runtime_cfg = rawget(getgenv(), "Config")
+
+    -- 1) Runtime trước
+    if type(runtime_cfg) == "table" and __count_keys(runtime_cfg) > 0 then
+        used_runtime = __apply_runtime_config(runtime_cfg)
+        if used_runtime then
+            print(("[AutoSaveGrouped] Applied RUNTIME config (%d top-level keys)."):format(__count_keys(runtime_cfg)))
         end
+    end
 
-        -- 2️⃣ Nếu không có runtime thì đọc file autosave.lua
-        if not used_runtime and not getgenv().ASG_IgnoreFile then
-            if isfile(path) then
-                local ok = pcall(function() loadfile(path)() end)
-                if ok and getgenv().Config then
-                    __apply_runtime_config(getgenv().Config)
-                else
-                    warn("[AutoSaveGrouped] Không thể load autosave.lua hoặc Config trống")
+    -- 2) File nếu chưa dùng runtime và không bị IgnoreFile
+    if not used_runtime and not getgenv().ASG_IgnoreFile then
+        if isfile(path) then
+            print("[AutoSaveGrouped] Loading file:", path)
+            -- tách 2 bước để bắt lỗi chi tiết
+            local ok_load, chunk_or_err = pcall(loadfile, path)
+            if not ok_load or type(chunk_or_err) ~= "function" then
+                warn("[AutoSaveGrouped] loadfile() failed: ", tostring(chunk_or_err))
+            else
+                local ok_run, err_run = pcall(chunk_or_err)
+                if not ok_run then
+                    warn("[AutoSaveGrouped] running autosave.lua failed: ", tostring(err_run))
                 end
             end
-        end
 
-        -- 3️⃣ Sau khi áp xong mới autosave lại để ghi ổn định
-        if type(autosave) == "function" then
-            task.delay(0.05, function() pcall(autosave) end)
+            local cfg_after = rawget(getgenv(), "Config")
+            if type(cfg_after) == "table" and __count_keys(cfg_after) > 0 then
+                __apply_runtime_config(cfg_after)
+                print(("[AutoSaveGrouped] Applied FILE config (%d top-level keys)."):format(__count_keys(cfg_after)))
+            else
+                warn("[AutoSaveGrouped] File loaded but Config is nil/empty.")
+            end
+        else
+            warn("[AutoSaveGrouped] autosave.lua not found at path: ", path)
         end
-    end)
+    end
+
+    -- 3) Sau khi áp xong mới autosave lại để ghi ổn định
+    if type(autosave) == "function" then
+        task.delay(0.05, function() pcall(autosave) end)
+    end
+end)
 end

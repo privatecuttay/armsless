@@ -31,7 +31,7 @@ return function(SaveManager)
             elseif obj.type == "Input" then
                 groups.Inputs[k] = tostring(obj.text or "")
             elseif obj.type == "Dropdown" then
-                if obj.mutli then
+                if obj.mutli or obj.multi then -- ✅ sửa typo
                     groups.Dropdowns[k] = obj.value or {}
                 else
                     groups.Dropdowns[k] = tostring(obj.value or "")
@@ -131,9 +131,6 @@ return function(SaveManager)
         setmetatable(opts, mt)
     end
 
-    -- lưu lần đầu
-    autosave()
-
     --------------------------------------------------------------------
     -- ✅ ƯU TIÊN getgenv().Config (runtime) TRƯỚC autosave.lua
     --------------------------------------------------------------------
@@ -181,12 +178,9 @@ return function(SaveManager)
         local used_runtime = false
         local runtime_cfg = rawget(getgenv(), "Config")
 
-        -- 1️⃣ Nếu có Config runtime → áp ngay & autosave
+        -- 1️⃣ Nếu có Config runtime → áp ngay
         if type(runtime_cfg) == "table" then
             used_runtime = __apply_runtime_config(runtime_cfg)
-            if used_runtime and type(autosave) == "function" then
-                task.delay(0.1, function() pcall(autosave) end)
-            end
         end
 
         -- 2️⃣ Nếu không có runtime thì đọc file autosave.lua
@@ -199,6 +193,11 @@ return function(SaveManager)
                     warn("[AutoSaveGrouped] Không thể load autosave.lua hoặc Config trống")
                 end
             end
+        end
+
+        -- 3️⃣ Sau khi áp xong mới autosave lại để ghi ổn định
+        if type(autosave) == "function" then
+            task.delay(0.05, function() pcall(autosave) end)
         end
     end)
 end

@@ -20,10 +20,9 @@ local function render_table(tbl, indent)
     for _,k in ipairs(order) do
         local v = tbl[k]
         if type(v) == "table" and not v.__is_value then
-            -- ✅ THAY đổi dòng này:
             push(string.format('%s["%s"] = {', pad2, esc(k)))  -- { cùng dòng
             render_table(v, indent+2)
-            push(pad2.."    },") -- đóng cùng indent
+            push(pad2.."    },")
         else
             push(string.format('%s["%s"] = %s,', pad2, esc(k), v))
         end

@@ -44,7 +44,6 @@ return function(SaveManager)
         local function serialize(tbl, indent)
             indent = indent or "    "
             local lines = {"{"}
-            -- sắp xếp khóa để ổn định
             local keys = {}
             for k,_ in pairs(tbl) do keys[#keys+1] = k end
             table.sort(keys, function(a,b) return tostring(a) < tostring(b) end)
@@ -56,9 +55,7 @@ return function(SaveManager)
                 if type(v) == "string" then
                     val = string.format('"%s"', esc(v))
                 elseif type(v) == "table" then
-                    -- table con (multi dropdown)
                     local sub = {"{"}
-                    -- nếu là array thuần -> in mảng; nếu là map -> in map
                     local is_array = (#v > 0)
                     if is_array then
                         for i=1,#v do
@@ -95,7 +92,6 @@ return function(SaveManager)
         local path = folder.."/"..AUTOSAVE..".lua"
         writefile(path, table.concat(out, "\n"))
 
-        -- đặt autoload trỏ đến autosave
         local autoload = folder.."/autoload.txt"
         if not isfile(autoload) then writefile(autoload, AUTOSAVE) end
     end
@@ -110,7 +106,7 @@ return function(SaveManager)
         end)
     end
 
-    -- hook mọi option để autosave khi đổi
+    -- hook autosave cho từng option
     local function hook(opt)
         if type(opt) ~= "table" then return end
         if type(opt.OnChanged) == "function" then pcall(function() opt:OnChanged(autosave) end) end
@@ -138,42 +134,71 @@ return function(SaveManager)
     -- lưu lần đầu
     autosave()
 
-    -- ===== Khôi phục từ autosave.lua (đọc theo nhóm) =====
-    local path = folder.."/"..AUTOSAVE..".lua"
-    if isfile(path) then
-        local ok,_ = pcall(function() loadfile(path)() end)
-        if ok and getgenv().Config then
-            task.defer(function()
-                local cfg = getgenv().Config
-                local function apply(tbl)
-                    for key,val in pairs(tbl or {}) do
-                        local opt = SaveManager.Options[key]
-                        if opt then
-                            if opt.Type == "Toggle" then
-                                pcall(function() opt:SetValue(val == true) end)
-                            elseif opt.Type == "Input" then
-                                pcall(function() opt:SetValue(tostring(val or "")) end)
-                            elseif opt.Type == "Dropdown" then
-                                pcall(function()
-                                    if opt.Multi then
-                                        opt:SetValue(type(val)=="table" and val or {})
-                                    else
-                                        opt:SetValue(val ~= nil and val or "")
-                                    end
-                                end)
-                            elseif opt.Type == "Slider" then
-                                pcall(function() opt:SetValue(tonumber(val) or 0) end)
-                            end
+    --------------------------------------------------------------------
+    -- ✅ ƯU TIÊN getgenv().Config (runtime) TRƯỚC autosave.lua
+    --------------------------------------------------------------------
+    local function __apply_table_to_options(tbl)
+        for key, val in pairs(tbl or {}) do
+            local opt = SaveManager.Options[key]
+            if opt then
+                if opt.Type == "Toggle" then
+                    pcall(function() opt:SetValue(val == true) end)
+                elseif opt.Type == "Input" then
+                    pcall(function() opt:SetValue(tostring(val or "")) end)
+                elseif opt.Type == "Dropdown" then
+                    pcall(function()
+                        if opt.Multi then
+                            opt:SetValue(type(val)=="table" and val or {})
+                        else
+                            opt:SetValue(val ~= nil and val or "")
                         end
-                    end
+                    end)
+                elseif opt.Type == "Slider" then
+                    pcall(function() opt:SetValue(tonumber(val) or 0) end)
                 end
-                apply(cfg.Toggles)
-                apply(cfg.Dropdowns)
-                apply(cfg.Inputs)
-                apply(cfg.Sliders)
-            end)
-        else
-            warn("[AutoSaveGrouped] Không thể load autosave.lua")
+            end
         end
     end
+
+    local function __apply_runtime_config(cfg)
+        if type(cfg) ~= "table" then return false end
+        if cfg.Toggles or cfg.Dropdowns or cfg.Inputs or cfg.Sliders then
+            __apply_table_to_options(cfg.Toggles)
+            __apply_table_to_options(cfg.Dropdowns)
+            __apply_table_to_options(cfg.Inputs)
+            __apply_table_to_options(cfg.Sliders)
+            return true
+        end
+        if next(cfg) ~= nil then
+            __apply_table_to_options(cfg)
+            return true
+        end
+        return false
+    end
+
+    local path = folder.."/"..AUTOSAVE..".lua"
+    task.defer(function()
+        local used_runtime = false
+        local runtime_cfg = rawget(getgenv(), "Config")
+
+        -- 1️⃣ Nếu có Config runtime → áp ngay & autosave
+        if type(runtime_cfg) == "table" then
+            used_runtime = __apply_runtime_config(runtime_cfg)
+            if used_runtime and type(autosave) == "function" then
+                task.delay(0.1, function() pcall(autosave) end)
+            end
+        end
+
+        -- 2️⃣ Nếu không có runtime thì đọc file autosave.lua
+        if not used_runtime and not getgenv().ASG_IgnoreFile then
+            if isfile(path) then
+                local ok = pcall(function() loadfile(path)() end)
+                if ok and getgenv().Config then
+                    __apply_runtime_config(getgenv().Config)
+                else
+                    warn("[AutoSaveGrouped] Không thể load autosave.lua hoặc Config trống")
+                end
+            end
+        end
+    end)
 end

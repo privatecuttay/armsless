@@ -1,0 +1,32 @@
+local function render_table(tbl, indent)
+    indent = indent or 0
+    local pad  = string.rep("    ", indent)
+    local pad2 = string.rep("    ", indent+1)
+    push(pad.."{")
+    local marked = {}
+    local order = {}
+    if tbl.__order then
+        for _,k in ipairs(tbl.__order) do
+            if tbl[k] ~= nil then table.insert(order, k); marked[k]=true end
+        end
+    end
+    local rest = {}
+    for k,_ in pairs(tbl) do
+        if k ~= "__order" and not marked[k] then table.insert(rest, k) end
+    end
+    table.sort(rest, function(a,b) return tostring(a)<tostring(b) end)
+    for _,k in ipairs(rest) do table.insert(order, k) end
+
+    for _,k in ipairs(order) do
+        local v = tbl[k]
+        if type(v) == "table" and not v.__is_value then
+            -- ✅ THAY đổi dòng này:
+            push(string.format('%s["%s"] = {', pad2, esc(k)))  -- { cùng dòng
+            render_table(v, indent+2)
+            push(pad2.."    },") -- đóng cùng indent
+        else
+            push(string.format('%s["%s"] = %s,', pad2, esc(k), v))
+        end
+    end
+    push(pad.."}")
+end

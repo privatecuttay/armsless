@@ -1,9 +1,22 @@
+-- AutoSaveGrouped.lua (NO MISC, SECTION-BASED)
+-- Ghi duy nhất các group: Auto Farming, Auto Selling, Auto Equip, Auto Buying
+-- Không xuất "Misc"; control nào không thuộc 4 section này sẽ bị bỏ qua.
+-- Gọi bằng: AutoSaveGrouped(SaveManager)
+
 return function(SaveManager)
     local AUTOSAVE = "autosave"
-    local saving = false
-    local folder = SaveManager.Folder .. "/settings"
+    local saving   = false
+    local folder   = SaveManager.Folder .. "/settings"
 
-    -- ====== Utils ======
+    -- 4 section cố định
+    local SECTIONS = {
+        ["Auto Farming"] = true,
+        ["Auto Selling"] = true,
+        ["Auto Equip"]   = true,
+        ["Auto Buying"]  = true,
+    }
+
+    -- ===== Utils =====
     local function esc(s)
         s = tostring(s or ""):gsub("\\","\\\\"):gsub('"','\\"'):gsub("\n","\\n"):gsub("\r","\\r")
         return s
@@ -11,19 +24,14 @@ return function(SaveManager)
 
     local function as_lua_value(obj)
         if not obj then return '""' end
-        if obj.type == "Toggle" then
-            return tostring(obj.value)
-        elseif obj.type == "Input" then
-            return string.format('"%s"', esc(obj.text or ""))
-        elseif obj.type == "Slider" then
-            return tostring(obj.value)
-        elseif obj.type == "Dropdown" then
+        if obj.type == "Toggle"   then return tostring(obj.value) end
+        if obj.type == "Input"    then return string.format('"%s"', esc(obj.text or "")) end
+        if obj.type == "Slider"   then return tostring(obj.value) end
+        if obj.type == "Dropdown" then
             if obj.mutli and type(obj.value) == "table" then
                 table.sort(obj.value, function(a,b) return tostring(a)<tostring(b) end)
                 local parts = {}
-                for _,v in ipairs(obj.value) do
-                    parts[#parts+1] = string.format('["%s"] = true', esc(v))
-                end
+                for _,v in ipairs(obj.value) do parts[#parts+1] = string.format('["%s"] = true', esc(v)) end
                 return "{ "..table.concat(parts, ", ").." }"
             else
                 return string.format('"%s"', esc(tostring(obj.value)))
@@ -32,104 +40,98 @@ return function(SaveManager)
         return '""'
     end
 
+    -- Thu thập option -> obj (SaveManager.Parser.Save)
     local function collect_raw()
         local raw = {}
         for idx,opt in pairs(SaveManager.Options) do
             if SaveManager.Parser[opt.Type] and not SaveManager.Ignore[idx] then
                 local ok,obj = pcall(SaveManager.Parser[opt.Type].Save, idx, opt)
-                if ok and obj then
-                    raw[obj.idx or idx] = obj
-                end
+                if ok and obj then raw[obj.idx or idx] = { obj = obj, opt = opt } end
             end
         end
         return raw
     end
 
-    -- ====== Nhóm theo Section ======
-    local SECTIONS = {
-        "Auto Farming",
-        "Auto Selling",
-        "Auto Equip",
-        "Auto Buying",
-    }
-
-    local function sort_controls_by_type(a, b)
-        local order = { Toggle = 1, Input = 2, Dropdown = 3 }
-        local A = SaveManager.Options[a]
-        local B = SaveManager.Options[b]
-        local ta, tb = A and A.Type or "", B and B.Type or ""
-        local oa, ob = order[ta] or 99, order[tb] or 99
-        if oa == ob then
-            return tostring(a) < tostring(b)
+    -- Cố gắng lấy tên Section thực tế từ option (nếu Fluent/SaveManager có giữ)
+    local function detect_section_from_opt(opt)
+        -- các khả năng thường gặp
+        if type(opt.Section) == "table" then
+            if type(opt.Section.Title) == "string" then return opt.Section.Title end
+            if opt.Section.TitleLabel and opt.Section.TitleLabel.Text then return tostring(opt.Section.TitleLabel.Text) end
         end
-        return oa < ob
+        if type(opt.Parent) == "table" and type(opt.Parent.Title) == "string" then
+            return opt.Parent.Title
+        end
+        -- Cho phép override thủ công nếu muốn: getgenv().ASG_Map = { idx = "Auto Selling", ... }
+        if getgenv().ASG_Map and type(getgenv().ASG_Map[opt.Idx or opt.Flag or ""]) == "string" then
+            return getgenv().ASG_Map[opt.Idx or opt.Flag or ""]
+        end
+        return nil
+    end
+
+    -- Sắp xếp theo loại control: Toggle -> Input -> Dropdown, cùng loại thì theo tên idx
+    local function control_type_rank(t)
+        if t == "Toggle"   then return 1 end
+        if t == "Input"    then return 2 end
+        if t == "Dropdown" then return 3 end
+        return 99
     end
 
     local function writePrettyConfig()
         local raw = collect_raw()
 
-        -- build groups theo Section
-        local groups = {}
-        for _,sectionName in ipairs(SECTIONS) do
-            groups[sectionName] = {}
-            for key,obj in pairs(raw) do
-                if obj.section == sectionName then
-                    groups[sectionName][key] = as_lua_value(obj)
-                end
+        -- build groups theo section; mọi thứ không map vào 4 section sẽ bỏ qua
+        local groups = { ["Auto Farming"] = {}, ["Auto Selling"] = {}, ["Auto Equip"] = {}, ["Auto Buying"] = {} }
+
+        for key,pack in pairs(raw) do
+            local obj, opt = pack.obj, pack.opt
+            local sectionName = detect_section_from_opt(opt)
+            if sectionName and SECTIONS[sectionName] then
+                groups[sectionName][key] = { rendered = as_lua_value(obj), type = obj.type or (opt and opt.Type) }
             end
         end
 
-        -- lọc các key không thuộc section nào
-        local singles = {}
-        for key,obj in pairs(raw) do
-            if not obj.section or not groups[obj.section] then
-                singles[key] = as_lua_value(obj)
-            end
-        end
-
+        -- tạo thư mục
         if not isfolder(SaveManager.Folder) then makefolder(SaveManager.Folder) end
         if not isfolder(folder) then makefolder(folder) end
-        local path = folder.."/"..AUTOSAVE..".lua"
+        local path = folder .. "/" .. AUTOSAVE .. ".lua"
 
+        -- render
         local out = {}
         local function push(s) out[#out+1] = s end
         push("getgenv().Config = {")
 
-        for _,sectionName in ipairs(SECTIONS) do
+        local ORDER_TOP = { "Auto Farming", "Auto Selling", "Auto Equip", "Auto Buying" }
+        for _,sectionName in ipairs(ORDER_TOP) do
             local tbl = groups[sectionName]
             if tbl and next(tbl) then
+                -- sort theo loại control rồi theo idx
                 local keys = {}
-                for k,_ in pairs(tbl) do table.insert(keys, k) end
-                table.sort(keys, sort_controls_by_type)
+                for k,_ in pairs(tbl) do keys[#keys+1] = k end
+                table.sort(keys, function(a,b)
+                    local ta, tb = tbl[a].type, tbl[b].type
+                    local ra, rb = control_type_rank(ta), control_type_rank(tb)
+                    if ra == rb then return tostring(a) < tostring(b) end
+                    return ra < rb
+                end)
+
                 push(string.format('    ["%s"] = {', esc(sectionName)))
                 for _,k in ipairs(keys) do
-                    local v = tbl[k]
-                    push(string.format('        ["%s"] = %s,', esc(k), v))
+                    push(string.format('        ["%s"] = %s,', esc(k), tbl[k].rendered))
                 end
                 push("    },")
             end
         end
 
-        -- nếu có các key lẻ ngoài section
-        if next(singles) then
-            push('    ["Misc"] = {')
-            local keys = {}
-            for k,_ in pairs(singles) do table.insert(keys, k) end
-            table.sort(keys, sort_controls_by_type)
-            for _,k in ipairs(keys) do
-                local v = singles[k]
-                push(string.format('        ["%s"] = %s,', esc(k), v))
-            end
-            push("    },")
-        end
-
         push("}")
         writefile(path, table.concat(out, "\n"))
 
-        local autoload = folder.."/autoload.txt"
+        -- autoload
+        local autoload = folder .. "/autoload.txt"
         if not isfile(autoload) then writefile(autoload, AUTOSAVE) end
     end
 
+    -- autosave debounce
     local function autosave()
         if saving then return end
         saving = true
@@ -139,6 +141,7 @@ return function(SaveManager)
         end)
     end
 
+    -- hook thay đổi control
     local function hook(opt)
         if type(opt) ~= "table" then return end
         if type(opt.OnChanged) == "function" then pcall(function() opt:OnChanged(autosave) end) end
@@ -151,25 +154,25 @@ return function(SaveManager)
     for _,opt in pairs(SaveManager.Options) do hook(opt) end
     do
         local opts = SaveManager.Options
-        local mt = getmetatable(opts) or {}
-        local old = mt.__newindex
+        local mt   = getmetatable(opts) or {}
+        local old  = mt.__newindex
         mt.__newindex = function(t,k,v)
             rawset(t,k,v); hook(v)
-            if type(old)=="function" then pcall(old,t,k,v) end
+            if type(old) == "function" then pcall(old,t,k,v) end
         end
-        setmetatable(opts,mt)
+        setmetatable(opts, mt)
     end
 
     autosave()
 
-    -- ====== Auto Restore Config ======
+    -- ===== Auto Restore từ autosave.lua =====
     local autosave_path = folder .. "/autosave.lua"
     if isfile(autosave_path) then
-        local ok, _ = pcall(function() loadfile(autosave_path)() end)
+        local ok,_ = pcall(function() loadfile(autosave_path)() end)
         if ok and getgenv().Config then
             task.defer(function()
                 for group, data in pairs(getgenv().Config) do
-                    if type(data) == "table" then
+                    if SECTIONS[group] and type(data) == "table" then
                         for key, value in pairs(data) do
                             local opt = SaveManager.Options[key]
                             if opt then
@@ -182,9 +185,7 @@ return function(SaveManager)
                                         if opt.Multi then
                                             if type(value) == "table" then
                                                 local sel = {}
-                                                for k,v in pairs(value) do
-                                                    if v == true then table.insert(sel, k) end
-                                                end
+                                                for k,v in pairs(value) do if v == true then sel[#sel+1] = k end end
                                                 opt:SetValue(sel)
                                             end
                                         else
@@ -193,19 +194,6 @@ return function(SaveManager)
                                     end)
                                 end
                             end
-                        end
-                    else
-                        local opt = SaveManager.Options[group]
-                        if opt then
-                            pcall(function()
-                                if opt.Type == "Toggle" then
-                                    opt:SetValue(data == true or data == "true")
-                                elseif opt.Type == "Input" then
-                                    opt:SetValue(tostring(data or ""))
-                                elseif opt.Type == "Dropdown" then
-                                    opt:SetValue(tostring(data or ""))
-                                end
-                            end)
                         end
                     end
                 end

@@ -3,6 +3,7 @@ return function(SaveManager)
     local saving   = false
     local folder   = SaveManager.Folder .. "/settings"
 
+    -- Thu thập option -> obj từ SaveManager.Parser.Save
     local function collect_raw()
         local raw = {}
         for idx,opt in pairs(SaveManager.Options) do
@@ -14,68 +15,89 @@ return function(SaveManager)
         return raw
     end
 
-    local function type_order(t)
-        if t == "Toggle"   then return 1 end
-        if t == "Dropdown" then return 2 end
-        if t == "Input"    then return 3 end
-        if t == "Slider"   then return 4 end
-        return 99
-    end
-
     local function esc(s)
         s = tostring(s or ""):gsub("\\","\\\\"):gsub('"','\\"')
         return s
     end
 
-    -- Save all controls (Lua table style)
+    -- ===== Ghi file nhóm theo loại =====
     local function writeLuaConfig()
         local raw = collect_raw()
-        local sorted = {}
-        for k,_ in pairs(raw) do table.insert(sorted, k) end
-        table.sort(sorted, function(a,b)
-            local ta,tb = raw[a].type, raw[b].type
-            local ra,rb = type_order(ta), type_order(tb)
-            if ra == rb then return tostring(a) < tostring(b) end
-            return ra < rb
-        end)
+        local groups = { Toggles = {}, Dropdowns = {}, Inputs = {}, Sliders = {} }
 
-        local lines = { "getgenv().Config = {" }
-        for _,key in ipairs(sorted) do
-            local obj = raw[key]
-            local valStr = ""
-
+        for k,obj in pairs(raw) do
             if obj.type == "Toggle" then
-                valStr = tostring(obj.value == true)
+                groups.Toggles[k] = obj.value == true
             elseif obj.type == "Input" then
-                valStr = string.format('"%s"', esc(obj.text))
+                groups.Inputs[k] = tostring(obj.text or "")
             elseif obj.type == "Dropdown" then
                 if obj.mutli then
-                    local arr = {}
-                    for _,v in ipairs(obj.value or {}) do
-                        table.insert(arr, string.format('"%s"', esc(v)))
-                    end
-                    valStr = "{ " .. table.concat(arr, ", ") .. " }"
+                    groups.Dropdowns[k] = obj.value or {}
                 else
-                    valStr = string.format('"%s"', esc(obj.value or ""))
+                    groups.Dropdowns[k] = tostring(obj.value or "")
                 end
             elseif obj.type == "Slider" then
-                valStr = tostring(obj.value or 0)
-            else
-                valStr = string.format('"%s"', esc(obj.value or obj.text or ""))
+                groups.Sliders[k] = tonumber(obj.value or 0)
             end
-
-            table.insert(lines, string.format("    %s = %s,", key, valStr))
         end
-        table.insert(lines, "}")
+
+        local function serialize(tbl, indent)
+            indent = indent or "    "
+            local lines = {"{"}
+            -- sắp xếp khóa để ổn định
+            local keys = {}
+            for k,_ in pairs(tbl) do keys[#keys+1] = k end
+            table.sort(keys, function(a,b) return tostring(a) < tostring(b) end)
+
+            for _,k in ipairs(keys) do
+                local v   = tbl[k]
+                local key = tostring(k)
+                local val
+                if type(v) == "string" then
+                    val = string.format('"%s"', esc(v))
+                elseif type(v) == "table" then
+                    -- table con (multi dropdown)
+                    local sub = {"{"}
+                    -- nếu là array thuần -> in mảng; nếu là map -> in map
+                    local is_array = (#v > 0)
+                    if is_array then
+                        for i=1,#v do
+                            sub[#sub+1] = string.format("%s    \"%s\",", indent, esc(v[i]))
+                        end
+                    else
+                        local sk = {}
+                        for kk,_ in pairs(v) do sk[#sk+1]=kk end
+                        table.sort(sk, function(a,b) return tostring(a) < tostring(b) end)
+                        for _,kk in ipairs(sk) do
+                            sub[#sub+1] = string.format("%s    [\"%s\"] = %s,", indent, esc(kk), tostring(v[kk] and true or false))
+                        end
+                    end
+                    sub[#sub+1] = indent.."}"
+                    val = table.concat(sub, "\n")
+                else
+                    val = tostring(v)
+                end
+                lines[#lines+1] = string.format("%s%s = %s,", indent, key, val)
+            end
+            lines[#lines+1] = (indent:sub(1, -5) or "").."}"
+            return table.concat(lines, "\n")
+        end
+
+        local out = {"getgenv().Config = {"}
+        out[#out+1] = "    Toggles = "..serialize(groups.Toggles, "        ")..","
+        out[#out+1] = "    Dropdowns = "..serialize(groups.Dropdowns, "        ")..","
+        out[#out+1] = "    Inputs = "..serialize(groups.Inputs, "        ")..","
+        out[#out+1] = "    Sliders = "..serialize(groups.Sliders, "        ")..","
+        out[#out+1] = "}"
 
         if not isfolder(SaveManager.Folder) then makefolder(SaveManager.Folder) end
         if not isfolder(folder) then makefolder(folder) end
-        local path = folder .. "/" .. AUTOSAVE .. ".lua"
-        writefile(path, table.concat(lines, "\n"))
+        local path = folder.."/"..AUTOSAVE..".lua"
+        writefile(path, table.concat(out, "\n"))
 
-        if not isfile(folder .. "/autoload.txt") then
-            writefile(folder .. "/autoload.txt", AUTOSAVE)
-        end
+        -- đặt autoload trỏ đến autosave
+        local autoload = folder.."/autoload.txt"
+        if not isfile(autoload) then writefile(autoload, AUTOSAVE) end
     end
 
     -- debounce autosave
@@ -88,12 +110,10 @@ return function(SaveManager)
         end)
     end
 
-    -- Hook changes
+    -- hook mọi option để autosave khi đổi
     local function hook(opt)
         if type(opt) ~= "table" then return end
-        if type(opt.OnChanged) == "function" then
-            pcall(function() opt:OnChanged(autosave) end)
-        end
+        if type(opt.OnChanged) == "function" then pcall(function() opt:OnChanged(autosave) end) end
         if type(opt.SetValue) == "function" then
             local o = opt.SetValue
             opt.SetValue = function(self, ...)
@@ -103,52 +123,57 @@ return function(SaveManager)
             end
         end
     end
-
     for _,opt in pairs(SaveManager.Options) do hook(opt) end
     do
         local opts = SaveManager.Options
         local mt = getmetatable(opts) or {}
         local old = mt.__newindex
         mt.__newindex = function(t, k, v)
-            rawset(t, k, v)
-            hook(v)
+            rawset(t, k, v); hook(v)
             if type(old) == "function" then pcall(old, t, k, v) end
         end
         setmetatable(opts, mt)
     end
 
-    -- save 1 lần lúc start
+    -- lưu lần đầu
     autosave()
 
-    -- restore lại từ autosave.lua
-    local path = folder .. "/" .. AUTOSAVE .. ".lua"
+    -- ===== Khôi phục từ autosave.lua (đọc theo nhóm) =====
+    local path = folder.."/"..AUTOSAVE..".lua"
     if isfile(path) then
-        local ok, _ = pcall(function() loadfile(path)() end)
+        local ok,_ = pcall(function() loadfile(path)() end)
         if ok and getgenv().Config then
             task.defer(function()
-                for k,v in pairs(getgenv().Config) do
-                    local opt = SaveManager.Options[k]
-                    if opt then
-                        if opt.Type == "Toggle" then
-                            pcall(function() opt:SetValue(v == true) end)
-                        elseif opt.Type == "Input" then
-                            pcall(function() opt:SetValue(tostring(v or "")) end)
-                        elseif opt.Type == "Dropdown" then
-                            pcall(function()
-                                if opt.Multi then
-                                    opt:SetValue(type(v)=="table" and v or {})
-                                else
-                                    opt:SetValue(v ~= nil and v or "")
-                                end
-                            end)
-                        elseif opt.Type == "Slider" then
-                            pcall(function() opt:SetValue(tonumber(v) or 0) end)
+                local cfg = getgenv().Config
+                local function apply(tbl)
+                    for key,val in pairs(tbl or {}) do
+                        local opt = SaveManager.Options[key]
+                        if opt then
+                            if opt.Type == "Toggle" then
+                                pcall(function() opt:SetValue(val == true) end)
+                            elseif opt.Type == "Input" then
+                                pcall(function() opt:SetValue(tostring(val or "")) end)
+                            elseif opt.Type == "Dropdown" then
+                                pcall(function()
+                                    if opt.Multi then
+                                        opt:SetValue(type(val)=="table" and val or {})
+                                    else
+                                        opt:SetValue(val ~= nil and val or "")
+                                    end
+                                end)
+                            elseif opt.Type == "Slider" then
+                                pcall(function() opt:SetValue(tonumber(val) or 0) end)
+                            end
                         end
                     end
                 end
+                apply(cfg.Toggles)
+                apply(cfg.Dropdowns)
+                apply(cfg.Inputs)
+                apply(cfg.Sliders)
             end)
         else
-            warn("[AutoSave] Không thể load autosave.lua")
+            warn("[AutoSaveGrouped] Không thể load autosave.lua")
         end
     end
 end

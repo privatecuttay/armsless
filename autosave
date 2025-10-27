@@ -64,21 +64,35 @@ local SaveManager = {} do
 
 	-- Hook mọi option để autosave khi SetValue/SetValueRGB được gọi
 	function SaveManager:_HookOption(idx, option)
-		local function wrap(method)
-			if type(option[method]) ~= "function" then return end
-			if option["__orig_"..method] then return end
-			option["__orig_"..method] = option[method]
-			option[method] = function(self_, ...)
-				local ret = option["__orig_"..method](self_, ...)
+	local function wrap(method)
+		if type(option[method]) ~= "function" then return end
+		if option["__orig_"..method] then return end
+		option["__orig_"..method] = option[method]
+		option[method] = function(self_, ...)
+			local ret = option["__orig_"..method](self_, ...)
+			if not SaveManager.Ignore[idx] then
+				SaveManager:QueueAutosave()
+			end
+			return ret
+		end
+	end
+	wrap("SetValue")
+	wrap("SetValueRGB")
+
+	-- ✅ Bắt cả Callback của Dropdown
+	if option.Type == "Dropdown" and option.Callback then
+		local old = option.Callback
+		option.Callback = function(...)
+			local r = old(...)
+			task.defer(function()
 				if not SaveManager.Ignore[idx] then
 					SaveManager:QueueAutosave()
 				end
-				return ret
-			end
+			end)
+			return r
 		end
-		wrap("SetValue")     -- Toggle/Slider/Dropdown/Keybind/Input
-		wrap("SetValueRGB")  -- Colorpicker
 	end
+end
 
 	function SaveManager:_HookAllOptions()
 		if not self.Options then return end

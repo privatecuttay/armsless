@@ -178,29 +178,61 @@ end
 		self:BuildFolderTree()
 	end
 
-	-- ===== LƯU THEO SECTION =====
 	function SaveManager:Save(name)
-		if (not name) then
-			return false, "no config file is selected"
-		end
-
-		local fullPath = self.Folder .. "/settings/" .. name .. ".json"
-		local data = { sections = {} }
-
-		for idx, option in next, SaveManager.Options do
-			if not self.Parser[option.Type] then continue end
-			if self.Ignore[idx] then continue end
-			local section = self.OptionSection[idx] or self.FallbackSection
-			data.sections[section] = data.sections[section] or { objects = {} }
-			table.insert(data.sections[section].objects, self.Parser[option.Type].Save(idx, option))
-		end
-
-		local ok, encoded = pcall(httpService.JSONEncode, httpService, data)
-		if not ok then return false, "failed to encode data" end
-		writefile(fullPath, encoded)
-		self._lastSaveTick = os.clock()
-		return true
+	if not name then
+		return false, "no config file is selected"
 	end
+
+	local fullPath = self.Folder .. "/settings/" .. name .. ".lua"
+
+	-- 🔹 Chuyển toàn bộ options → dạng bảng lồng section
+	local data = {}
+
+	for idx, option in next, SaveManager.Options do
+		if not self.Parser[option.Type] then continue end
+		if self.Ignore[idx] then continue end
+
+		local section = self.OptionSection[idx] or self.FallbackSection
+		data[section] = data[section] or {}
+		local v
+		if option.Type == "Toggle" then
+			v = option.Value
+		elseif option.Type == "Input" or option.Type == "Slider" then
+			v = option.Value
+		elseif option.Type == "Dropdown" then
+			v = option.Value
+		else
+			v = option.Value
+		end
+		data[section][idx] = v
+	end
+
+	-- 🔹 Tạo chuỗi Lua-style
+	local function serialize(tbl, indent)
+		indent = indent or 0
+		local pad = string.rep("    ", indent)
+		local str = "{\n"
+		for k, v in pairs(tbl) do
+			local key = string.format("[%q]", k)
+			local val
+			if type(v) == "table" then
+				val = serialize(v, indent + 1)
+			elseif type(v) == "string" then
+				val = string.format("%q", v)
+			else
+				val = tostring(v)
+			end
+			str = str .. string.rep("    ", indent + 1) .. key .. " = " .. val .. ",\n"
+		end
+		str = str .. pad .. "}"
+		return str
+	end
+
+	local luaText = "return " .. serialize(data, 0)
+	writefile(fullPath, luaText)
+	self._lastSaveTick = os.clock()
+	return true
+end
 
 	-- ===== HỖ TRỢ: đọc autosave.json (dạng mới/ cũ) =====
 	function SaveManager:_ReadAutosaveObjects()

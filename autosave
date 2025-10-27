@@ -257,11 +257,11 @@ end
 		return nil
 	end
 
-	-- ===== ÁP BẢNG (sectioned) VÀO OPTIONS
-	-- cfg = { ["Auto Farming"] = { ["Auto Fish"]=true, ["Fishing Spot"]="None" }, ... }
-	-- overwrite=true: ghi đè; false: chỉ set nếu chưa có giá trị/không có trong existedKeys
 	function SaveManager:ApplyConfigTable(cfg, overwrite, existedKeys)
-		if type(cfg) ~= "table" then return end
+	if type(cfg) ~= "table" then return end
+
+	-- đảm bảo Fluent UI đã load (nếu cần)
+	task.defer(function()
 		for section, kv in pairs(cfg) do
 			if type(kv) == "table" then
 				for key, val in pairs(kv) do
@@ -270,24 +270,36 @@ end
 						local already = existedKeys and existedKeys[idx] or false
 						if overwrite or not already then
 							local opt = self.Options[idx]
-							-- cố gắng set theo loại option
-							if opt.Type == "Toggle" or opt.Type == "Keybind" or opt.Type == "Slider" or opt.Type == "Input" then
-								opt:SetValue(val)
-							elseif opt.Type == "Dropdown" then
-								-- hỗ trợ chuỗi, bảng (multi)
-                                opt:SetValue(val)
-							elseif opt.Type == "Colorpicker" and typeof(val) == "Color3" then
-								opt:SetValueRGB(val, opt.Transparency)
-							else
-								-- fallback
-								pcall(function() opt:SetValue(val) end)
-							end
+
+							-- ✅ Phân loại để gọi đúng hàm Fluent
+							task.defer(function()
+								if opt.Type == "Toggle" then
+									opt:SetValue(val)
+								elseif opt.Type == "Input" then
+									opt:SetValue(val)
+								elseif opt.Type == "Slider" then
+									opt:SetValue(val)
+								elseif opt.Type == "Keybind" then
+									opt:SetValue(val)
+								elseif opt.Type == "Dropdown" then
+									if typeof(val) == "table" then
+										opt:SetValue(val) -- Multi
+									else
+										opt:SetValue(tostring(val)) -- Single
+									end
+								elseif opt.Type == "Colorpicker" and typeof(val) == "Color3" then
+									opt:SetValueRGB(val, opt.Transparency)
+								else
+									pcall(function() opt:SetValue(val) end)
+								end
+							end)
 						end
 					end
 				end
 			end
 		end
-	end
+	end)
+end
 
 	-- ===== TẢI THEO SECTION (tương thích ngược) =====
 	function SaveManager:Load(name)

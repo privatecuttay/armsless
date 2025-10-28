@@ -93,13 +93,13 @@ local InterfaceManager = {} do
             local ok, ui = pcall(function() return gethui and gethui() end)
             return (ok and typeof(ui) == "Instance" and ui) or game:GetService("CoreGui")
         end
-	local parent = uiRoot()
+		local parent = uiRoot()
+	
+		local old = parent:FindFirstChild("Meo_Button")
+		if old then
+	    	old:Destroy()
+		end
 
-	-- Nếu đã có GUI cũ, xóa đi
-	local old = parent:FindFirstChild("Meo_Button")
-	if old then
-    	old:Destroy()
-	end
         local gui = Instance.new("ScreenGui")
         gui.Name = "Meo_Button"
         gui.IgnoreGuiInset = true

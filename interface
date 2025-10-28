@@ -96,7 +96,7 @@ local InterfaceManager = {} do
 	local parent = uiRoot()
 
 	-- Nếu đã có GUI cũ, xóa đi
-	local old = parent:FindFirstChild("Fluent_CtrlSquare")
+	local old = parent:FindFirstChild("Meo_Button")
 	if old then
     	old:Destroy()
 	end

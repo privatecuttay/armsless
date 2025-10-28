@@ -1,16 +1,16 @@
--- SaveManager.lua (singleton-safe, silent apply, no false-on-destroy, lua-table autosave)
+-- SaveManager.lua (robust: wait-for-options, method OnChanged hook, polling fallback, no empty overwrite)
 local HttpService = game:GetService("HttpService")
 
--- ===== Singleton guard =====
+-- Singleton guard (giữ 1 instance)
 do
     local g = getgenv and getgenv() or _G
-    if g.SaveManager and type(g.SaveManager)=="table" and g.SaveManager.__SM_SIGNATURE=="xal.save.v2" then
+    if g.SaveManager and type(g.SaveManager)=="table" and g.SaveManager.__SM_SIGNATURE=="xal.save.v3" then
         return g.SaveManager
     end
 end
 
 local SaveManager = {} do
-    SaveManager.__SM_SIGNATURE = "xal.save.v2"
+    SaveManager.__SM_SIGNATURE = "xal.save.v3"
     SaveManager.Folder = "FluentScriptHub/specific-game"
     SaveManager.FileName = "autosave.lua"
 
@@ -20,8 +20,9 @@ local SaveManager = {} do
     SaveManager._suppressSave = false
     SaveManager._ifaceBlock   = 0
     SaveManager._loading      = false
+    SaveManager._debug        = false
 
-    -- ===== utils =====
+    local function dbg(...) if SaveManager._debug then print("[SaveManager]", ...) end end
     local function ensureFolder(p) if not isfolder(p) then pcall(makefolder,p) end end
     local function autosavePath() return SaveManager.Folder.."/"..SaveManager.FileName end
     local function ensureFile(path) if not isfile(path) then pcall(writefile, path, "return {}\n") end end
@@ -44,7 +45,6 @@ local SaveManager = {} do
             return string.format("%q", tostring(v))
         end
     end
-
     local function read_lua_table(path)
         if not isfile(path) then return {} end
         local ok, src = pcall(readfile, path); if not ok then return {} end
@@ -63,12 +63,15 @@ local SaveManager = {} do
             or self._loading == true
             or getgenv().__IFACE_CLOSING == true
     end
+    local function hasAny(t) for _ in pairs(t or {}) do return true end return false end
+    local function getFlags(self)
+        local L = self.Library
+        return (L and (L.Flags or L.Options)) or {}
+    end
 
-    -- ===== interface block =====
     function SaveManager:_IfaceBlockOn()  self._ifaceBlock = (self._ifaceBlock or 0) + 1 end
     function SaveManager:_IfaceBlockOff() self._ifaceBlock = math.max(0, (self._ifaceBlock or 0) - 1) end
 
-    -- ===== public =====
     function SaveManager:SetIgnoreIndexes(list)
         self.Ignore = {}
         for _,k in ipairs(list or {}) do self.Ignore[k] = true end
@@ -80,10 +83,9 @@ local SaveManager = {} do
     end
     function SaveManager:SetLibrary(lib)
         self.Library = lib
-        self.Options = (lib and (lib.Flags or lib.Options)) or {}
+        self.Options = getFlags(self)
     end
 
-    -- silent apply: không kích callback user
     function SaveManager:_WithSilentApply(fn)
         self._loading = true
         getgenv().__SAVE_APPLYING = true
@@ -93,7 +95,6 @@ local SaveManager = {} do
         if not ok then warn("[SaveManager] apply error:", err) end
     end
 
-    -- helpers
     local function getVal(opt)
         if typeof(opt)~="table" then return nil end
         return rawget(opt,"Value")
@@ -111,6 +112,7 @@ local SaveManager = {} do
     function SaveManager:_writeAll(tbl)
         ensureFolder(self.Folder); ensureFile(autosavePath())
         write_lua_table(autosavePath(), tbl)
+        dbg("wrote autosave.lua")
     end
     function SaveManager:_writeKey(key, v)
         if isBlocked(self) then return end
@@ -121,7 +123,7 @@ local SaveManager = {} do
     function SaveManager:_applyAllToOptions()
         local t = self:_readAll()
         self:_WithSilentApply(function()
-            local opts = self.Options or {}
+            local opts = getFlags(self)
             for k,v in pairs(t) do
                 if not (self.Ignore and self.Ignore[k]) then
                     local o = opts[k]; if o then pcall(setVal, o, v) end
@@ -130,36 +132,83 @@ local SaveManager = {} do
         end)
     end
 
-    -- hook OnChanged (idempotent)
+    -- Gắn theo kiểu Fluent: opt:OnChanged(cb), không overwrite thuộc tính
+    local function attachChanged(opt, key)
+        local attached = false
+        -- Thử kiểu method `:OnChanged(cb)`
+        local ok = pcall(function()
+            if typeof(opt.OnChanged)=="function" then
+                opt:OnChanged(function(...)
+                    if getgenv().__IFACE_CLOSING or getgenv().__SAVE_APPLYING then return end
+                    if isBlocked(SaveManager) then return end
+                    task.defer(function()
+                        SaveManager:_writeKey(key, getVal(opt))
+                    end)
+                end)
+                attached = true
+            end
+        end)
+        if attached then return true end
+
+        -- Nếu không có method OnChanged, dùng polling dự phòng (được set bên dưới)
+        return false
+    end
+
     function SaveManager:_HookAutosave()
         task.spawn(function()
             while task.wait(0.25) do
-                local flags = self.Library and (self.Library.Flags or self.Library.Options)
-                if type(flags)~="table" then continue end
+                local flags = getFlags(self)
+                if type(flags)~="table" or not hasAny(flags) then continue end
                 for key, opt in pairs(flags) do
                     if self.Ignore and self.Ignore[key] then continue end
-                    if typeof(opt)=="table" and typeof(opt.OnChanged)=="function" and not opt.__sm_hooked then
-                        opt.__sm_hooked = true
-                        local old = opt.OnChanged
-                        opt.OnChanged = function(...)
-                            if getgenv().__IFACE_CLOSING or getgenv().__SAVE_APPLYING then
-                                -- Bỏ qua callback user trong lúc đóng GUI / nạp autosave
-                                return
+                    if typeof(opt)~="table" or opt.__sm_hooked then continue end
+                    opt.__sm_hooked = true
+
+                    -- 1) Ưu tiên attach kiểu Fluent
+                    local okAttach = attachChanged(opt, key)
+
+                    -- 2) Polling dự phòng nếu không attach được
+                    task.spawn(function()
+                        local last = HttpService:JSONEncode(getVal(opt))
+                        while opt.__sm_hooked do
+                            task.wait(0.5)
+                            local cur = HttpService:JSONEncode(getVal(opt))
+                            if cur ~= last then
+                                last = cur
+                                if not (getgenv().__IFACE_CLOSING or getgenv().__SAVE_APPLYING) and not isBlocked(SaveManager) then
+                                    SaveManager:_writeKey(key, getVal(opt))
+                                end
                             end
-                            local ok, err = pcall(old, ...)
-                            if not ok then warn("[SaveManager] OnChanged:", err) end
-                            if isBlocked(SaveManager) then return end
-                            task.defer(function() SaveManager:_writeKey(key, getVal(opt)) end)
                         end
-                    end
+                    end)
                 end
             end
         end)
     end
 
+    -- Chờ options sẵn → apply im lặng → hook → snapshot khởi tạo (không ghi {} rỗng)
     function SaveManager:LoadWithPriority()
-        self:_applyAllToOptions()
-        self:_HookAutosave()
+        task.spawn(function()
+            local deadline = os.clock() + 10
+            while os.clock() < deadline do
+                self.Options = getFlags(self)
+                if hasAny(self.Options) then break end
+                task.wait(0.1)
+            end
+
+            self:_applyAllToOptions()
+            self:_HookAutosave()
+
+            -- snapshot ban đầu (nếu có ít nhất 1 key)
+            local data = {}
+            for k,opt in pairs(getFlags(self)) do
+                if not (self.Ignore and self.Ignore[k]) then
+                    local v = getVal(opt)
+                    if v ~= nil then data[k] = v end
+                end
+            end
+            if next(data) then self:_writeAll(data) end
+        end)
     end
 end
 

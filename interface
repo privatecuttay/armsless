@@ -1,4 +1,4 @@
--- InterfaceManager.lua (fixed: no nil 'gui' access, safe reset on destroy, Meo button no-dup)
+-- InterfaceManager.lua (1321
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do

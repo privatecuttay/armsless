@@ -1,4 +1,4 @@
--- InterfaceManager.lua 122
+-- InterfaceManager.lua ew
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -64,6 +64,116 @@ local InterfaceManager = {} do
         return nil
     end
 
+    -- ========= Meo Button helpers (chống trùng ở CoreGui & gethui) =========
+    local function _getUiRoots()
+        local roots = { game:GetService("CoreGui") }
+        local ok, ui = pcall(function() return gethui and gethui() end)
+        if ok and typeof(ui)=="Instance" then table.insert(roots, ui) end
+        return roots
+    end
+
+    local function _findMeoButton()
+        for _,root in ipairs(_getUiRoots()) do
+            local g = root:FindFirstChild("Meo_Button")
+            if g and g:IsA("ScreenGui") then
+                return g
+            end
+        end
+        return nil
+    end
+
+    local function _preferredRoot()
+        local ok, ui = pcall(function() return gethui and gethui() end)
+        if ok and typeof(ui)=="Instance" then return ui end
+        return game:GetService("CoreGui")
+    end
+
+    local function _ensureMeoButton(Settings)
+        if _findMeoButton() then return end -- đã có, không tạo trùng
+
+        local VIM = game:GetService("VirtualInputManager")
+        local UIS = game:GetService("UserInputService")
+        local TweenService = game:GetService("TweenService")
+
+        local parent = _preferredRoot()
+
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "Meo_Button"
+        gui.IgnoreGuiInset = true
+        gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+        gui.ResetOnSpawn = false
+        gui.Parent = parent
+
+        local btn = Instance.new("ImageButton")
+        btn.Name = "CtrlSquare"
+        btn.Size = UDim2.fromOffset(50, 50)
+        btn.AnchorPoint = Vector2.new(1, 1)
+        btn.Position = UDim2.new(1, -20, 1, -20)
+        btn.BackgroundColor3 = Color3.fromRGB(44, 44, 44)
+        btn.Image = "rbxassetid://138537648998329"
+        btn.ScaleType = Enum.ScaleType.Fit
+        btn.AutoButtonColor = true
+        btn.Parent = gui
+
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
+        local stroke = Instance.new("UIStroke", btn)
+        stroke.Thickness = 1
+        stroke.Color = Color3.fromRGB(200, 150, 180)
+
+        -- Drag + clamp
+        local dragging, dragStart, startPos
+        local function clampToViewport(pos)
+            local cam = workspace.CurrentCamera
+            if not cam then return pos end
+            local vw, vh = cam.ViewportSize.X, cam.ViewportSize.Y
+            local x = math.clamp(pos.X.Offset, -vw + 20, -20)
+            local y = math.clamp(pos.Y.Offset, -vh + 20, -20)
+            return UDim2.new(pos.X.Scale, x, pos.Y.Scale, y)
+        end
+
+        btn.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+                dragStart = input.Position
+                startPos = btn.Position
+            end
+        end)
+        UIS.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local delta = input.Position - dragStart
+                local target = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + delta.X,
+                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                )
+                btn.Position = clampToViewport(target)
+            end
+        end)
+        UIS.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+            end
+        end)
+
+        -- Slime + gửi keybind
+        local function slimeEffect()
+            local tweenIn = TweenService:Create(btn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Size = UDim2.fromOffset(44, 44)
+            })
+            local tweenOut = TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Size = UDim2.fromOffset(50, 50)
+            })
+            tweenIn:Play(); tweenIn.Completed:Wait(); tweenOut:Play()
+        end
+        btn.MouseButton1Click:Connect(function()
+            slimeEffect()
+            local keyName = tostring(Settings and Settings.MenuKeybind or "LeftControl")
+            local key = Enum.KeyCode[keyName] or Enum.KeyCode.LeftControl
+            VIM:SendKeyEvent(true, key, false, game)
+            task.wait(0.05)
+            VIM:SendKeyEvent(false, key, false, game)
+        end)
+    end
+
     -- 🔗 Gắn auto-reset khi GUI bị xóa
     local function _attachAutoReset(Library)
         if not Library then return end
@@ -89,21 +199,39 @@ local InterfaceManager = {} do
 	end
 
     function InterfaceManager:SetLibrary(library)
-        -- ❗ Nếu đã có Fluent GUI khác tồn tại → không tạo thêm, hủy library mới
+        local Settings = InterfaceManager.Settings
+
+        -- ❗ Không tạo trùng Fluent GUI: nếu đã có GUI thì liên kết vào nó
         local existingGui = _findExistingFluentGui()
-        if existingGui and library and library.GUI and existingGui ~= library.GUI then
-            print("⚠️ GUI Fluent đã có sẵn, không tạo thêm.")
-            pcall(function()
-                if typeof(library.Destroy) == "function" then
-                    library:Destroy()
-                elseif library.GUI then
-                    library.GUI:Destroy()
-                end
-            end)
-            return -- giữ nguyên self.Library (bản cũ)
+        if existingGui then
+            local running = rawget(getgenv(), "Fluent")
+            if type(running) == "table" and running.GUI == existingGui then
+                self.Library = running
+                _attachAutoReset(running)
+            else
+                -- shim tối thiểu để BuildInterfaceSection không lỗi khi không có object Library đầy đủ
+                self.Library = self.Library or { GUI = existingGui, Themes = { "Dark","Light" }, SetTheme = function() end }
+                _attachAutoReset(self.Library)
+            end
+
+            -- nếu truyền vào library mới khác GUI đang có → phá hủy để tránh trùng
+            if library and library.GUI and library.GUI ~= existingGui then
+                print("⚠️ GUI Fluent đã có sẵn, không tạo thêm.")
+                pcall(function()
+                    if typeof(library.Destroy) == "function" then
+                        library:Destroy()
+                    elseif library.GUI then
+                        library.GUI:Destroy()
+                    end
+                end)
+            end
+
+            -- đảm bảo luôn có Meo Button dù reattach
+            _ensureMeoButton(Settings)
+            return
         end
 
-        -- Nếu trước đó đã có Library khác và bạn đang thay thế → tắt toggle bản cũ
+        -- Chưa có GUI → dùng library truyền vào
         if self.Library and self.Library ~= library then
             pcall(function()
                 if typeof(self.Library.Destroy) == "function" then
@@ -117,6 +245,7 @@ local InterfaceManager = {} do
 
         self.Library = library
         _attachAutoReset(library)
+        _ensureMeoButton(Settings)
 	end
 
     function InterfaceManager:BuildFolderTree()
@@ -150,128 +279,10 @@ local InterfaceManager = {} do
         end
     end
 
-    -- ========= Helper: Meo Button (chống trùng cả CoreGui & gethui) =========
-    local function _getUiRoots()
-        local roots = { game:GetService("CoreGui") }
-        local ok, ui = pcall(function() return gethui and gethui() end)
-        if ok and typeof(ui)=="Instance" then table.insert(roots, ui) end
-        return roots
-    end
-
-    local function _findMeoButton()
-        for _,root in ipairs(_getUiRoots()) do
-            local g = root:FindFirstChild("Meo_Button")
-            if g and g:IsA("ScreenGui") then
-                return g, root
-            end
-        end
-        return nil, nil
-    end
-
-    local function _preferredRoot()
-        local ok, ui = pcall(function() return gethui and gethui() end)
-        if ok and typeof(ui)=="Instance" then return ui end
-        return game:GetService("CoreGui")
-    end
-
-    local function _ensureMeoButton(Settings)
-        local existed = _findMeoButton()
-        if existed then return end -- đã có, không tạo trùng
-
-        local VIM = game:GetService("VirtualInputManager")
-        local UIS = game:GetService("UserInputService")
-        local TweenService = game:GetService("TweenService")
-        local RunService = game:GetService("RunService")
-
-        local parent = _preferredRoot()
-
-        local gui = Instance.new("ScreenGui")
-        gui.Name = "Meo_Button"
-        gui.IgnoreGuiInset = true
-        gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-        gui.ResetOnSpawn = false
-        gui.Parent = parent
-
-        local btn = Instance.new("ImageButton")
-        btn.Name = "CtrlSquare"
-        btn.Size = UDim2.fromOffset(50, 50)
-        btn.AnchorPoint = Vector2.new(1, 1)
-        btn.Position = UDim2.new(1, -20, 1, -20)
-        btn.BackgroundColor3 = Color3.fromRGB(44, 44, 44)
-        btn.Image = "rbxassetid://138537648998329"
-        btn.ScaleType = Enum.ScaleType.Fit
-        btn.AutoButtonColor = true
-        btn.Parent = gui
-
-        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
-        local stroke = Instance.new("UIStroke", btn)
-        stroke.Thickness = 1
-        stroke.Color = Color3.fromRGB(200, 150, 180)
-
-        -- Drag (mượt, clamp trong màn hình)
-        local dragging, dragStart, startPos
-        local function clampToViewport(pos)
-            local cam = workspace.CurrentCamera
-            if not cam then return pos end
-            local vw, vh = cam.ViewportSize.X, cam.ViewportSize.Y
-            local x = math.clamp(pos.X.Offset, -vw + 20, -20)
-            local y = math.clamp(pos.Y.Offset, -vh + 20, -20)
-            return UDim2.new(pos.X.Scale, x, pos.Y.Scale, y)
-        end
-
-        btn.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-                dragStart = input.Position
-                startPos = btn.Position
-            end
-        end)
-
-        UIS.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = false
-            end
-        end)
-
-        UIS.InputChanged:Connect(function(input)
-            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                local delta = input.Position - dragStart
-                local target = UDim2.new(
-                    startPos.X.Scale, startPos.X.Offset + delta.X,
-                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
-                )
-                btn.Position = clampToViewport(target)
-            end
-        end)
-
-        -- Slime effect + send keybind
-        local function slimeEffect()
-            local tweenIn = TweenService:Create(btn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Size = UDim2.fromOffset(44, 44)
-            })
-            local tweenOut = TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                Size = UDim2.fromOffset(50, 50)
-            })
-            tweenIn:Play()
-            tweenIn.Completed:Wait()
-            tweenOut:Play()
-        end
-
-        btn.MouseButton1Click:Connect(function()
-            slimeEffect()
-            local keyName = tostring(Settings and Settings.MenuKeybind or "LeftControl")
-            local key = Enum.KeyCode[keyName] or Enum.KeyCode.LeftControl
-            VIM:SendKeyEvent(true, key, false, game)
-            task.wait(0.05)
-            VIM:SendKeyEvent(false, key, false, game)
-        end)
-    end
-
     -- ========= UI Section =========
     function InterfaceManager:BuildInterfaceSection(tab)
-        -- tránh error nil (line ~154): đảm bảo Library hợp lệ trước khi dùng
         if not self or not self.Library then
-            warn("⚠️ InterfaceManager: Library chưa sẵn; bỏ qua BuildInterfaceSection.")
+            -- không còn nil nữa trong flow bình thường, nhưng giữ guard cho chắc
             return
         end
 
@@ -281,7 +292,7 @@ local InterfaceManager = {} do
 
 		local section = tab:AddSection("Interface")
 
-		local themes = Library and Library.Themes
+        local themes = Library and Library.Themes
         if typeof(themes) ~= "table" or #themes == 0 then
             themes = { "Dark", "Light" }
         end
@@ -311,7 +322,7 @@ local InterfaceManager = {} do
 		end)
 		Library.MinimizeKeybind = MenuKeybind
 
-        -- ✅ Bổ sung Meo Button, chống trùng trên cả CoreGui & gethui
+        -- vẫn an toàn nếu gọi lại
         _ensureMeoButton(Settings)
     end
 end

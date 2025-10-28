@@ -40,10 +40,29 @@ local SaveManager = {} do
     end
 
     local function write_lua_table(path, tbl)
-        local dumped = "return " .. HttpService:JSONEncode(tbl):gsub('"%[','['):gsub('%]"',']')
-        local ok, err = pcall(writefile, path, dumped)
-        if not ok then warn("[SaveManager] write autosave.lua failed:", err) end
+    local function serialize(t, indent)
+        indent = indent or ""
+        local str = "{\n"
+        local nextIndent = indent .. "  "
+        for k, v in pairs(t) do
+            local key = ("[%q]"):format(tostring(k))
+            local value
+            if type(v) == "table" then
+                value = serialize(v, nextIndent)
+            elseif type(v) == "string" then
+                value = ("%q"):format(v)
+            else
+                value = tostring(v)
+            end
+            str = str .. nextIndent .. key .. " = " .. value .. ",\n"
+        end
+        return str .. indent .. "}"
     end
+
+    local content = "return " .. serialize(tbl)
+    local ok, err = pcall(writefile, path, content)
+    if not ok then warn("[SaveManager] write autosave.lua failed:", err) end
+end
 
     ---------------------------------------------------------------------
     -- 🚫 Interface block

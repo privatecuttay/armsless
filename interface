@@ -41,9 +41,7 @@ local InterfaceManager = {} do
                 folder .. "/settings/autoload.json",
             }
             for _, p in ipairs(paths) do
-                pcall(function()
-                    if isfile(p) then writefile(p, "{}") end
-                end)
+                pcall(function() if isfile(p) then writefile(p, "{}") end end)
             end
 
             pcall(function() if typeof(SM.Save) == "function" then SM:Save() end end)
@@ -51,18 +49,28 @@ local InterfaceManager = {} do
         end
     end
 
-    -- destroy old Fluent/Meo_Button GUIs when executing again
-    local function _destroyOldGuis()
-        local parents = {game:GetService("CoreGui")}
+    -- destroy old Fluent GUIs: attribute/signature based
+    local function _destroyOldGuis(excluding)
+        local CoreGui = game:GetService("CoreGui")
+        local roots = { CoreGui }
         local ok, ui = pcall(function() return gethui and gethui() end)
-        if ok and typeof(ui)=="Instance" then table.insert(parents, ui) end
+        if ok and typeof(ui)=="Instance" then table.insert(roots, ui) end
 
-        for _, parent in ipairs(parents) do
-            for _, g in ipairs(parent:GetChildren()) do
-                if g:IsA("ScreenGui") and (g.Name == "Fluent" or g.Name == "Meo_Button") then
+        local function looksLikeFluent(inst)
+            if inst:GetAttribute("Fluent") == true then return true end
+            if inst:FindFirstChild("AcrylicPaint", true) then return true end
+            if inst:FindFirstChild("TopBar", true) and inst:FindFirstChild("Window", true) then return true end
+            return false
+        end
+
+        for _,root in ipairs(roots) do
+            for _,g in ipairs(root:GetChildren()) do
+                if g ~= excluding and g:IsA("ScreenGui") and looksLikeFluent(g) then
                     pcall(function() g:Destroy() end)
                 end
             end
+            local btn = root:FindFirstChild("Meo_Button")
+            if btn and btn ~= excluding then pcall(function() btn:Destroy() end) end
         end
     end
 
@@ -73,15 +81,13 @@ local InterfaceManager = {} do
         if Library.___AutoNilAttached then return end
         Library.___AutoNilAttached = true
 
+        pcall(function() gui:SetAttribute("Fluent", true) end)
+
         if gui.Destroying then
-            gui.Destroying:Connect(function()
-                _nilAllToggles(Library)
-            end)
+            gui.Destroying:Connect(function() _nilAllToggles(Library) end)
         end
         gui.AncestryChanged:Connect(function(_, parent)
-            if parent == nil then
-                _nilAllToggles(Library)
-            end
+            if parent == nil then _nilAllToggles(Library) end
         end)
     end
     -- ====================================
@@ -92,11 +98,18 @@ local InterfaceManager = {} do
 	end
 
     function InterfaceManager:SetLibrary(library)
-        -- cleanup previous library/toggles and GUIs before switching
         if self.Library and self.Library ~= library then
+            pcall(function()
+                if typeof(self.Library.Destroy) == "function" then
+                    self.Library:Destroy()
+                elseif self.Library.GUI then
+                    self.Library.GUI:Destroy()
+                end
+            end)
             _nilAllToggles(self.Library)
         end
-        _destroyOldGuis()
+
+        _destroyOldGuis(library and library.GUI)
 
 		self.Library = library
         _attachAutoNil(library)
@@ -104,15 +117,12 @@ local InterfaceManager = {} do
 
     function InterfaceManager:BuildFolderTree()
 		local paths = {}
-
 		local parts = self.Folder:split("/")
 		for idx = 1, #parts do
 			paths[#paths + 1] = table.concat(parts, "/", 1, idx)
 		end
-
 		table.insert(paths, self.Folder)
 		table.insert(paths, self.Folder .. "/settings")
-
 		for i = 1, #paths do
 			local str = paths[i]
 			if not isfolder(str) then
@@ -130,7 +140,6 @@ local InterfaceManager = {} do
         if isfile(path) then
             local data = readfile(path)
             local success, decoded = pcall(httpService.JSONDecode, httpService, data)
-
             if success then
                 for i, v in next, decoded do
                     InterfaceManager.Settings[i] = v
@@ -178,7 +187,6 @@ local InterfaceManager = {} do
         end
 		local parent = uiRoot()
 
-        -- ensure single Meo_Button instance
 		local old = parent:FindFirstChild("Meo_Button")
 		if old then pcall(function() old:Destroy() end) end
 

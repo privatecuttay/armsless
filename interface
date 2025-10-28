@@ -94,8 +94,15 @@ local InterfaceManager = {} do
             return (ok and typeof(ui) == "Instance" and ui) or game:GetService("CoreGui")
         end
 
+		local parent = uiRoot()
+		
+		-- Nếu đã có GUI cũ, xóa đi
+		local old = parent:FindFirstChild("Meo_Button")
+		if old then
+		    old:Destroy()
+		end
         local gui = Instance.new("ScreenGui")
-        gui.Name = "Fluent_CtrlSquare"
+        gui.Name = "Meo_Button"
         gui.IgnoreGuiInset = true
         gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
         gui.ResetOnSpawn = false

@@ -9,11 +9,10 @@ local InterfaceManager = {} do
         MenuKeybind = "LeftControl"
     }
 
-    -- ===== auto-nil toggles & saves =====
+    -- ===== helpers: nil all toggles & wipe saves =====
     local function _nilAllToggles(Library)
         if not Library then return end
 
-        -- 1) Set all toggles to false, then nil out flags/options
         local bags = {}
         if typeof(Library.Flags) == "table" then table.insert(bags, Library.Flags) end
         if typeof(Library.Options) == "table" then table.insert(bags, Library.Options) end
@@ -29,7 +28,6 @@ local InterfaceManager = {} do
             end
         end
 
-        -- 2) Wipe SaveManager (if exists) + known files
         local SM = rawget(getgenv(), "SaveManager")
         if type(SM) == "table" then
             if type(SM.Options) == "table" then for k in pairs(SM.Options) do SM.Options[k] = nil end end
@@ -50,6 +48,21 @@ local InterfaceManager = {} do
 
             pcall(function() if typeof(SM.Save) == "function" then SM:Save() end end)
             pcall(function() if typeof(SM.SaveSettings) == "function" then SM:SaveSettings() end end)
+        end
+    end
+
+    -- destroy old Fluent/Meo_Button GUIs when executing again
+    local function _destroyOldGuis()
+        local parents = {game:GetService("CoreGui")}
+        local ok, ui = pcall(function() return gethui and gethui() end)
+        if ok and typeof(ui)=="Instance" then table.insert(parents, ui) end
+
+        for _, parent in ipairs(parents) do
+            for _, g in ipairs(parent:GetChildren()) do
+                if g:IsA("ScreenGui") and (g.Name == "Fluent" or g.Name == "Meo_Button") then
+                    pcall(function() g:Destroy() end)
+                end
+            end
         end
     end
 
@@ -79,10 +92,12 @@ local InterfaceManager = {} do
 	end
 
     function InterfaceManager:SetLibrary(library)
-        -- if switching to a new Library (execute again), nil the old one first
+        -- cleanup previous library/toggles and GUIs before switching
         if self.Library and self.Library ~= library then
             _nilAllToggles(self.Library)
         end
+        _destroyOldGuis()
+
 		self.Library = library
         _attachAutoNil(library)
 	end
@@ -163,10 +178,9 @@ local InterfaceManager = {} do
         end
 		local parent = uiRoot()
 
+        -- ensure single Meo_Button instance
 		local old = parent:FindFirstChild("Meo_Button")
-		if old then
-	    	old:Destroy()
-		end
+		if old then pcall(function() old:Destroy() end) end
 
         local gui = Instance.new("ScreenGui")
         gui.Name = "Meo_Button"

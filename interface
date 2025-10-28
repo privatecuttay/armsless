@@ -1,46 +1,73 @@
--- InterfaceManager.lua (1321
-local httpService = game:GetService("HttpService")
+-- InterfaceManager.lua (no-duplicate GUI, clean destroy, block autosave on reset, optional Meo button)
+local HttpService = game:GetService("HttpService")
+
+-- ===== Mini Maid (cleanup utilities) =====
+local Maid = {}; Maid.__index = Maid
+function Maid.new() return setmetatable({tasks = {}}, Maid) end
+function Maid:Give(x)
+    local t
+    if typeof(x)=="RBXScriptConnection" then
+        t = function() pcall(function() x:Disconnect() end) end
+    elseif typeof(x)=="Instance" then
+        if typeof(x.Destroy)=="function" then t = function() pcall(function() x:Destroy() end) end end
+    elseif type(x)=="table" and typeof(x.Cancel)=="function" then
+        t = function() pcall(function() x:Cancel() end) end
+    elseif type(x)=="function" then
+        t = x
+    end
+    if t then table.insert(self.tasks, t) end
+    return x
+end
+function Maid:DoCleaning()
+    for i=#self.tasks,1,-1 do pcall(self.tasks[i]) end
+    table.clear(self.tasks)
+end
+
+-- ==== tokens to stop task.spawn loops ====
+getgenv().__TOKENS = getgenv().__TOKENS or { __GEN = 0 }
+
+local function _ifaceBlockOn()
+    local SM = rawget(getgenv(), "SaveManager")
+    if SM then
+        if typeof(SM._IfaceBlockOn)=="function" then SM:_IfaceBlockOn() else SM._suppressSave = true end
+    end
+end
+local function _ifaceBlockOff()
+    local SM = rawget(getgenv(), "SaveManager")
+    if SM then
+        if typeof(SM._IfaceBlockOff)=="function" then SM:_IfaceBlockOff() else SM._suppressSave = false end
+    end
+end
 
 local InterfaceManager = {} do
-	InterfaceManager.Folder = "FluentSettings"
+    InterfaceManager.Folder = "FluentSettings"
     InterfaceManager.Settings = {
         Theme = "Dark",
         Acrylic = true,
         Transparency = true,
-        MenuKeybind = "LeftControl"
+        MenuKeybind = "LeftControl",
     }
 
-    -- 🔁 Tắt tất cả toggle về false nhưng KHÔNG ghi file
+    -- reset all toggles to false (no save) — used only when GUI is closing
     local function _resetAllToggles_NoSave(Library)
         if not Library then return end
-        local SM = rawget(getgenv(), "SaveManager")
-        if SM and type(SM)=="table" then SM._suppressSave = true end
-
         local bags = {}
-        if typeof(Library.Flags) == "table"   then table.insert(bags, Library.Flags)   end
-        if typeof(Library.Options) == "table" then table.insert(bags, Library.Options) end
+        if typeof(Library.Flags)=="table"   then table.insert(bags, Library.Flags)   end
+        if typeof(Library.Options)=="table" then table.insert(bags, Library.Options) end
 
         for _, bag in ipairs(bags) do
             for _, flag in pairs(bag) do
-                if typeof(flag) == "table" and (flag.Type == "Toggle" or flag.Type == "toggle") then
+                if typeof(flag)=="table" and (flag.Type=="Toggle" or flag.Type=="toggle") then
                     pcall(function()
-                        if typeof(flag.SetValue) == "function" then
-                            flag:SetValue(false)
-                        elseif rawget(flag, "Value") ~= nil then
-                            flag.Value = false
-                        end
+                        if typeof(flag.SetValue)=="function" then flag:SetValue(false)
+                        elseif rawget(flag,"Value")~=nil then flag.Value=false end
                     end)
                 end
             end
         end
-
-        task.defer(function()
-            local SM2 = rawget(getgenv(), "SaveManager")
-            if SM2 and type(SM2)=="table" then SM2._suppressSave = false end
-        end)
     end
 
-    -- 🔎 Tìm Fluent GUI đang tồn tại (không đụng Roblox Settings)
+    -- find existing Fluent GUI (avoid duplicates)
     local function _findExistingFluentGui()
         local CoreGui = game:GetService("CoreGui")
         local roots = { CoreGui }
@@ -53,8 +80,8 @@ local InterfaceManager = {} do
         for _,root in ipairs(roots) do
             for _,g in ipairs(root:GetChildren()) do
                 if g:IsA("ScreenGui") and not isSystemGui(g) then
-                    if g:GetAttribute("Fluent") == true
-                    or g.Name == "Fluent" or g.Name == "FluentUI"
+                    if g:GetAttribute("Fluent")==true
+                    or g.Name=="Fluent" or g.Name=="FluentUI"
                     or (g:FindFirstChild("AcrylicPaint", true) and g:FindFirstChild("Window", true)) then
                         return g
                     end
@@ -64,294 +91,122 @@ local InterfaceManager = {} do
         return nil
     end
 
-    -- ========= Meo Button helpers (chống trùng & bám đời Fluent GUI) =========
-    local function _getUiRoots()
-        local roots = { game:GetService("CoreGui") }
-        local ok, ui = pcall(function() return gethui and gethui() end)
-        if ok and typeof(ui)=="Instance" then table.insert(roots, ui) end
-        return roots
-    end
-
-    local function _findMeoButton()
-        for _,root in ipairs(_getUiRoots()) do
-            local g = root:FindFirstChild("Meo_Button")
-            if g and g:IsA("ScreenGui") then return g end
-        end
-        return nil
-    end
-
-    local function _preferredRoot()
-        local ok, ui = pcall(function() return gethui and gethui() end)
-        if ok and typeof(ui)=="Instance" then return ui end
-        return game:GetService("CoreGui")
-    end
-
-    -- anchorGui: ScreenGui Fluent cần bám đời; khi anchorGui bị xóa → Meo_Button tự xóa
-    local function _ensureMeoButton(Settings, anchorGui)
-        local existed = _findMeoButton()
-        if existed then
-            local anchorObj = existed:FindFirstChild("Anchor")
-            if anchorGui and (not anchorObj or anchorObj.Value ~= anchorGui) then
-                pcall(function() existed:Destroy() end)
-                existed = nil
-            else
-                return
-            end
-        end
-
-        local VIM = game:GetService("VirtualInputManager")
-        local UIS = game:GetService("UserInputService")
-        local TweenService = game:GetService("TweenService")
-        local parent = _preferredRoot()
-
-        local gui = Instance.new("ScreenGui")
-        gui.Name = "Meo_Button"
-        gui.IgnoreGuiInset = true
-        gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-        gui.ResetOnSpawn = false
-        gui.Parent = parent
-
-        local anchorVal = Instance.new("ObjectValue")
-        anchorVal.Name = "Anchor"
-        anchorVal.Value = anchorGui
-        anchorVal.Parent = gui
-
-        local btn = Instance.new("ImageButton")
-        btn.Name = "CtrlSquare"
-        btn.Size = UDim2.fromOffset(50, 50)
-        btn.AnchorPoint = Vector2.new(1, 1)
-        btn.Position = UDim2.new(1, -20, 1, -20)
-        btn.BackgroundColor3 = Color3.fromRGB(44, 44, 44)
-        btn.Image = "rbxassetid://138537648998329"
-        btn.ScaleType = Enum.ScaleType.Fit
-        btn.AutoButtonColor = true
-        btn.Parent = gui
-
-        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
-        local stroke = Instance.new("UIStroke", btn)
-        stroke.Thickness = 1
-        stroke.Color = Color3.fromRGB(200, 150, 180)
-
-        -- Drag + clamp
-        local dragging, dragStart, startPos
-        local function clampToViewport(pos)
-            local cam = workspace.CurrentCamera
-            if not cam then return pos end
-            local vw, vh = cam.ViewportSize.X, cam.ViewportSize.Y
-            local x = math.clamp(pos.X.Offset, -vw + 20, -20)
-            local y = math.clamp(pos.Y.Offset, -vh + 20, -20)
-            return UDim2.new(pos.X.Scale, x, pos.Y.Scale, y)
-        end
-
-        btn.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-                dragStart = input.Position
-                startPos = btn.Position
-            end
-        end)
-        UIS.InputChanged:Connect(function(input)
-            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                local delta = input.Position - dragStart
-                local target = UDim2.new(
-                    startPos.X.Scale, startPos.X.Offset + delta.X,
-                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
-                )
-                btn.Position = clampToViewport(target)
-            end
-        end)
-        UIS.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = false
-            end
-        end)
-
-        -- Slime + gửi keybind
-        local function slimeEffect()
-            local tweenIn = TweenService:Create(btn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Size = UDim2.fromOffset(44, 44)
-            })
-            local tweenOut = TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                Size = UDim2.fromOffset(50, 50)
-            })
-            tweenIn:Play(); tweenIn.Completed:Wait(); tweenOut:Play()
-        end
-        btn.MouseButton1Click:Connect(function()
-            slimeEffect()
-            local keyName = tostring(Settings and Settings.MenuKeybind or "LeftControl")
-            local key = Enum.KeyCode[keyName] or Enum.KeyCode.LeftControl
-            VIM:SendKeyEvent(true, key, false, game)
-            task.wait(0.05)
-            VIM:SendKeyEvent(false, key, false, game)
-        end)
-
-        -- ✅ Ràng đời: khi Fluent GUI bị xóa → Meo_Button cũng xóa theo
-        if anchorGui and anchorGui:IsA("Instance") then
-            if anchorGui.Destroying then
-                anchorGui.Destroying:Connect(function()
-                    if gui and gui.Parent then pcall(function() gui:Destroy() end) end
-                end)
-            end
-            anchorGui.AncestryChanged:Connect(function(_, parent)
-                if parent == nil then
-                    if gui and gui.Parent then pcall(function() gui:Destroy() end) end
-                end
-            end)
-        end
-    end
-
-    -- 🔗 Gắn auto-reset khi GUI bị xóa (FIX: không dùng biến 'gui' ngoài scope)
     local function _attachAutoReset(Library)
-        if not Library then return end
-        local gui = Library.GUI
-        if not gui or Library.___AutoResetAttached then return end
+        if not Library or Library.___AutoResetAttached then return end
         Library.___AutoResetAttached = true
 
+        local gui = Library.GUI
+        if not gui then return end
         pcall(function() gui:SetAttribute("Fluent", true) end)
 
-        local function safeReset()
-            local SM = rawget(getgenv(), "SaveManager")
-            if SM and type(SM) == "table" then
-                SM._suppressSave = true
-                task.defer(function() SM._suppressSave = false end)
-            end
+        local maid = Maid.new()
+        Library.___Maid = maid
+
+        local function safeResetAndClean()
+            getgenv().__IFACE_CLOSING = true
+            _ifaceBlockOn()
+
+            -- stop all guard-based loops
+            getgenv().__TOKENS.__GEN = getgenv().__TOKENS.__GEN + 1
+
+            -- optional: set all toggles to false silently for UI reflection
             _resetAllToggles_NoSave(Library)
+
+            -- cleanup tracked connections/instances/tweens
+            pcall(function() maid:DoCleaning() end)
+
+            task.delay(1.0, function()
+                getgenv().__IFACE_CLOSING = false
+                _ifaceBlockOff()
+            end)
         end
 
         if gui.Destroying then
-            gui.Destroying:Connect(safeReset)
+            maid:Give(gui.Destroying:Connect(function() safeResetAndClean() end))
         end
-        gui.AncestryChanged:Connect(function(_, parent)
-            if parent == nil then safeReset() end
-        end)
+        maid:Give(gui.AncestryChanged:Connect(function(_, parent)
+            if parent == nil then safeResetAndClean() end
+        end))
     end
 
-    -- ========= InterfaceManager core =========
     function InterfaceManager:SetFolder(folder)
-		self.Folder = folder
-		self:BuildFolderTree()
-	end
+        self.Folder = folder
+        local parts = string.split(self.Folder, "/")
+        local paths = {}
+        for i=1,#parts do paths[#paths+1] = table.concat(parts, "/", 1, i) end
+        table.insert(paths, self.Folder.."/settings")
+        for _,p in ipairs(paths) do if not isfolder(p) then makefolder(p) end end
+    end
+
+    function InterfaceManager:SaveSettings()
+        writefile(self.Folder.."/options.json", HttpService:JSONEncode(InterfaceManager.Settings))
+    end
+    function InterfaceManager:LoadSettings()
+        local p = self.Folder.."/options.json"
+        if isfile(p) then
+            local ok, t = pcall(function() return HttpService:JSONDecode(readfile(p)) end)
+            if ok and type(t)=="table" then for k,v in next, t do InterfaceManager.Settings[k]=v end end
+        end
+    end
 
     function InterfaceManager:SetLibrary(library)
-        local Settings = InterfaceManager.Settings
-
-        -- ❗ Không tạo trùng GUI Fluent: nếu đã có GUI thì bind vào nó
+        -- avoid duplicate GUI logic: if existing Fluent GUI found, prefer it
         local existingGui = _findExistingFluentGui()
         if existingGui then
             local running = rawget(getgenv(), "Fluent")
-            if type(running) == "table" and running.GUI == existingGui then
+            if type(running)=="table" and running.GUI==existingGui then
                 self.Library = running
-                _attachAutoReset(running)
             else
-                self.Library = self.Library or { GUI = existingGui, Themes = { "Dark","Light" }, SetTheme = function() end }
-                _attachAutoReset(self.Library)
+                self.Library = self.Library or { GUI = existingGui, Themes = {"Dark","Light"}, SetTheme=function() end }
             end
-
+            _attachAutoReset(self.Library)
+            -- destroy the incoming different library if any
             if library and library.GUI and library.GUI ~= existingGui then
-                print("⚠️ GUI Fluent đã có sẵn, không tạo thêm.")
                 pcall(function()
-                    if typeof(library.Destroy) == "function" then
-                        library:Destroy()
-                    elseif library.GUI then
-                        library.GUI:Destroy()
-                    end
+                    if typeof(library.Destroy)=="function" then library:Destroy()
+                    elseif library.GUI then library.GUI:Destroy() end
                 end)
             end
-
-            -- 🔗 Meo Button bám đời existing GUI
-            _ensureMeoButton(Settings, existingGui)
             return
         end
 
-        -- Chưa có GUI → dùng library truyền vào
         if self.Library and self.Library ~= library then
             pcall(function()
-                if typeof(self.Library.Destroy) == "function" then
-                    self.Library:Destroy()
-                elseif self.Library.GUI then
-                    self.Library.GUI:Destroy()
-                end
+                if typeof(self.Library.Destroy)=="function" then self.Library:Destroy()
+                elseif self.Library.GUI then self.Library.GUI:Destroy() end
             end)
-            _resetAllToggles_NoSave(self.Library)
         end
-
         self.Library = library
         _attachAutoReset(library)
-        -- 🔗 Meo Button bám đời GUI mới
-        local anchor = library and library.GUI or nil
-        _ensureMeoButton(Settings, anchor)
-	end
-
-    function InterfaceManager:BuildFolderTree()
-        local parts = string.split(self.Folder, "/")
-		local paths = {}
-		for idx = 1, #parts do
-			paths[#paths + 1] = table.concat(parts, "/", 1, idx)
-		end
-		table.insert(paths, self.Folder)
-		table.insert(paths, self.Folder .. "/settings")
-		for _, p in ipairs(paths) do
-			if not isfolder(p) then makefolder(p) end
-		end
-	end
-
-    function InterfaceManager:SaveSettings()
-        writefile(self.Folder .. "/options.json", httpService:JSONEncode(InterfaceManager.Settings))
     end
 
-    function InterfaceManager:LoadSettings()
-        local path = self.Folder .. "/options.json"
-        if isfile(path) then
-            local ok, decoded = pcall(function()
-                return httpService:JSONDecode(readfile(path))
-            end)
-            if ok and type(decoded)=="table" then
-                for k,v in next, decoded do
-                    InterfaceManager.Settings[k] = v
-                end
-            end
-        end
-    end
-
-    -- ========= UI Section =========
     function InterfaceManager:BuildInterfaceSection(tab)
         if not self or not self.Library then return end
-
-		local Library = self.Library
+        self:LoadSettings()
+        local Library = self.Library
         local Settings = InterfaceManager.Settings
-        InterfaceManager:LoadSettings()
 
-		local section = tab:AddSection("Interface")
+        local section = tab:AddSection("Interface")
+        local themes = Library.Themes; if typeof(themes)~="table" or #themes==0 then themes={"Dark","Light"} end
 
-        local themes = Library and Library.Themes
-        if typeof(themes) ~= "table" or #themes == 0 then
-            themes = { "Dark", "Light" }
-        end
-
-		local InterfaceTheme = section:AddDropdown("InterfaceTheme", {
-			Title = "Theme",
-			Description = "Changes the interface theme.",
-			Values = themes,
-			Default = Settings.Theme,
-			Callback = function(Value)
-                if Library and typeof(Library.SetTheme)=="function" then
-				    Library:SetTheme(Value)
-                end
-                Settings.Theme = Value
-                InterfaceManager:SaveSettings()
-			end
-		})
+        local InterfaceTheme = section:AddDropdown("InterfaceTheme", {
+            Title = "Theme",
+            Description = "Changes the interface theme.",
+            Values = themes,
+            Default = Settings.Theme,
+            Callback = function(v)
+                if typeof(Library.SetTheme)=="function" then Library:SetTheme(v) end
+                Settings.Theme = v; InterfaceManager:SaveSettings()
+            end
+        })
         pcall(function() InterfaceTheme:SetValue(Settings.Theme) end)
 
-		local MenuKeybind = section:AddKeybind("MenuKeybind", {
-            Title = "Minimize Bind",
-            Default = Settings.MenuKeybind
-        })
-		MenuKeybind:OnChanged(function()
-			Settings.MenuKeybind = MenuKeybind.Value
+        local MenuKeybind = section:AddKeybind("MenuKeybind", { Title = "Minimize Bind", Default = Settings.MenuKeybind })
+        MenuKeybind:OnChanged(function()
+            Settings.MenuKeybind = MenuKeybind.Value
             InterfaceManager:SaveSettings()
-		end)
-		Library.MinimizeKeybind = MenuKeybind
+        end)
+        Library.MinimizeKeybind = MenuKeybind
     end
 end
 

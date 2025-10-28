@@ -10,7 +10,7 @@ local InterfaceManager = {} do
     }
 
     ------------------------------------------------------------------------
-    -- 🧩 Reset tất cả toggle = false khi GUI Fluent bị xóa 123
+    -- 🧩 Reset toàn bộ toggle = false khi GUI bị xóa
     ------------------------------------------------------------------------
     local function resetAllToggles(Library)
         if not Library or type(Library.Flags) ~= "table" then return end
@@ -25,7 +25,7 @@ local InterfaceManager = {} do
                 end)
             end
         end
-        print("✅ Toàn bộ toggle đã được reset vì GUI bị xóa.")
+        print("✅ Tất cả toggle đã được reset vì GUI bị xóa.")
     end
 
     ------------------------------------------------------------------------
@@ -118,7 +118,7 @@ local InterfaceManager = {} do
 		Library.MinimizeKeybind = MenuKeybind
 
         --------------------------------------------------------------------
-        -- 🧭 Nút slime và kiểm tra GUI trùng (cả Fluent GUI + Meo_Button)
+        -- 🧭 Nút slime và kiểm tra GUI trùng (Fluent + Meo_Button)
         --------------------------------------------------------------------
         local VIM = game:GetService("VirtualInputManager")
         local UIS = game:GetService("UserInputService")
@@ -132,19 +132,15 @@ local InterfaceManager = {} do
 		local parent = uiRoot()
 
         -- 🔍 Kiểm tra nếu GUI Fluent hoặc Meo_Button đã tồn tại
-        local already = false
-        for _, g in ipairs(parent:GetChildren()) do
-            if g:IsA("ScreenGui") and (g.Name == "Fluent" or g.Name == "Meo_Button") then
-                already = true
-                break
-            end
-        end
-        if already then
+        local hasFluent = parent:FindFirstChild("Fluent")
+        local hasMeo = parent:FindFirstChild("Meo_Button")
+
+        if hasFluent or hasMeo then
             print("⚠️ GUI Fluent đã có sẵn, không tạo thêm.")
             return
         end
 
-        -- 🆕 Tạo GUI nút slime mới
+        -- 🆕 Tạo GUI Meo_Button mới
         local gui = Instance.new("ScreenGui")
         gui.Name = "Meo_Button"
         gui.IgnoreGuiInset = true

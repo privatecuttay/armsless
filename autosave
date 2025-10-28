@@ -1,16 +1,16 @@
--- SaveManager.lua (singleton-safe, no duplicate hooks on re-execute)
+-- SaveManager.lua (singleton-safe, silent apply, no false-on-destroy, lua-table autosave)
 local HttpService = game:GetService("HttpService")
 
--- ==== Singleton guard: nếu đã có SaveManager hợp lệ thì trả về luôn ====
+-- ===== Singleton guard =====
 do
     local g = getgenv and getgenv() or _G
-    if g.SaveManager and type(g.SaveManager)=="table" and g.SaveManager.__SM_SIGNATURE == "xal.save.v1" then
+    if g.SaveManager and type(g.SaveManager)=="table" and g.SaveManager.__SM_SIGNATURE=="xal.save.v2" then
         return g.SaveManager
     end
 end
 
 local SaveManager = {} do
-    SaveManager.__SM_SIGNATURE = "xal.save.v1"  -- để nhận diện instance hợp lệ
+    SaveManager.__SM_SIGNATURE = "xal.save.v2"
     SaveManager.Folder = "FluentScriptHub/specific-game"
     SaveManager.FileName = "autosave.lua"
 
@@ -26,7 +26,6 @@ local SaveManager = {} do
     local function autosavePath() return SaveManager.Folder.."/"..SaveManager.FileName end
     local function ensureFile(path) if not isfile(path) then pcall(writefile, path, "return {}\n") end end
 
-    -- lua serializer (valid for loadstring)
     local function serialize(v, indent)
         indent = indent or ""
         local tv = typeof(v)
@@ -59,14 +58,17 @@ local SaveManager = {} do
     end
 
     local function isBlocked(self)
-        return self._suppressSave == true or (self._ifaceBlock or 0) > 0 or self._loading == true
+        return self._suppressSave == true
+            or (self._ifaceBlock or 0) > 0
+            or self._loading == true
+            or getgenv().__IFACE_CLOSING == true
     end
 
-    -- ===== interface block (để Interface reset false không bị ghi) =====
+    -- ===== interface block =====
     function SaveManager:_IfaceBlockOn()  self._ifaceBlock = (self._ifaceBlock or 0) + 1 end
     function SaveManager:_IfaceBlockOff() self._ifaceBlock = math.max(0, (self._ifaceBlock or 0) - 1) end
 
-    -- ===== public API =====
+    -- ===== public =====
     function SaveManager:SetIgnoreIndexes(list)
         self.Ignore = {}
         for _,k in ipairs(list or {}) do self.Ignore[k] = true end
@@ -81,7 +83,7 @@ local SaveManager = {} do
         self.Options = (lib and (lib.Flags or lib.Options)) or {}
     end
 
-    -- silent apply để callback UI không chạy khi nạp autosave
+    -- silent apply: không kích callback user
     function SaveManager:_WithSilentApply(fn)
         self._loading = true
         getgenv().__SAVE_APPLYING = true
@@ -91,7 +93,7 @@ local SaveManager = {} do
         if not ok then warn("[SaveManager] apply error:", err) end
     end
 
-    -- ===== helpers =====
+    -- helpers
     local function getVal(opt)
         if typeof(opt)~="table" then return nil end
         return rawget(opt,"Value")
@@ -128,8 +130,7 @@ local SaveManager = {} do
         end)
     end
 
-    -- ===== hook OnChanged (idempotent) =====
-    -- Đảm bảo MỖI option chỉ được hook 1 lần: dùng cờ __sm_hooked = true trên chính option
+    -- hook OnChanged (idempotent)
     function SaveManager:_HookAutosave()
         task.spawn(function()
             while task.wait(0.25) do
@@ -138,12 +139,11 @@ local SaveManager = {} do
                 for key, opt in pairs(flags) do
                     if self.Ignore and self.Ignore[key] then continue end
                     if typeof(opt)=="table" and typeof(opt.OnChanged)=="function" and not opt.__sm_hooked then
-                        opt.__sm_hooked = true  -- 🔒 idempotent guard: lần sau execute lại sẽ không gắn thêm
+                        opt.__sm_hooked = true
                         local old = opt.OnChanged
                         opt.OnChanged = function(...)
-                            -- Bịt callback khi đang đóng GUI hoặc đang nạp autosave
                             if getgenv().__IFACE_CLOSING or getgenv().__SAVE_APPLYING then
-                                local ok0 = pcall(old, ...) -- nếu bạn không muốn chạy old, có thể bỏ dòng này
+                                -- Bỏ qua callback user trong lúc đóng GUI / nạp autosave
                                 return
                             end
                             local ok, err = pcall(old, ...)
@@ -157,13 +157,11 @@ local SaveManager = {} do
         end)
     end
 
-    -- ===== lifecycle =====
     function SaveManager:LoadWithPriority()
         self:_applyAllToOptions()
         self:_HookAutosave()
     end
 end
 
--- công bố singleton
 if getgenv then getgenv().SaveManager = SaveManager end
 return SaveManager

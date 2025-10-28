@@ -1,507 +1,319 @@
--- SaveManager (FLAT autosave, ultra nil-safe, no sections)
--- Lưu/Nạp theo từng option (Toggle/Dropdown/Input/Slider/Keybind/Colorpicker)
--- File lưu: <folder>/settings/<name>.lua  (return {...})
-
 local httpService = game:GetService("HttpService")
 
--- ===== helpers ===============================================================
-local function table_clone(src)
-    if typeof(table.clone) == "function" then return table.clone(src) end
-    local t = {}
-    for k,v in pairs(src) do
-        if type(v) == "table" then
-            local sub = {}; for k2,v2 in pairs(v) do sub[k2]=v2 end
-            t[k] = sub
-        else t[k] = v end
-    end
-    return t
-end
-
-local function color3_from_hex(hex)
-    if typeof(Color3.fromHex) == "function" then return Color3.fromHex(hex) end
-    hex = tostring(hex or ""):gsub("^#","")
-    if #hex ~= 6 then return Color3.new(1,1,1) end
-    local r = tonumber(hex:sub(1,2),16) or 255
-    local g = tonumber(hex:sub(3,4),16) or 255
-    local b = tonumber(hex:sub(5,6),16) or 255
-    return Color3.fromRGB(r,g,b)
-end
-
-local function color3_to_hex(c3)
-    if typeof(c3) ~= "Color3" then return nil end
-    if typeof(c3.ToHex) == "function" then
-        local ok,h = pcall(function() return c3:ToHex() end)
-        if ok and type(h) == "string" then return h end
-    end
-    local r,g,b = math.floor(c3.R*255+0.5), math.floor(c3.G*255+0.5), math.floor(c3.B*255+0.5)
-    return string.format("%02X%02X%02X", r,g,b)
-end
-
-local function safe_load_lua_file(path)
-    if not isfile(path) then return false, "nofile" end
-    local src = readfile(path)
-    src = src:gsub("^\239\187\191", "")
-    local chunk, err = loadstring(src)
-    if not chunk then return false, err end
-    local ok, res = pcall(chunk)
-    if not ok then return false, res end
-    return true, res
-end
-
-local function serialize_lua(tbl, indent)
-    indent = indent or 0
-    local pad = string.rep("    ", indent)
-    local lines = {"{\n"}
-    for k, v in pairs(tbl) do
-        local key = string.format("[%q]", tostring(k))
-        local val
-        if type(v) == "table" then
-            val = serialize_lua(v, indent + 1)
-        elseif type(v) == "string" then
-            val = string.format("%q", v)
-        else
-            val = tostring(v)
-        end
-        table.insert(lines, string.rep("    ", indent + 1) .. key .. " = " .. val .. ",\n")
-    end
-    table.insert(lines, pad .. "}")
-    return table.concat(lines)
-end
-
--- ===== SaveManager ===========================================================
 local SaveManager = {} do
-    SaveManager.Folder = "FluentSettings"
-    SaveManager.Ignore = {}
-    SaveManager.AUTOSAVE_NAME = "autosave"
-    SaveManager._loading = false
-    SaveManager._debounce = nil
-    SaveManager._debounceDelay = 0.25
-    SaveManager._lastSaveTick = 0
-    SaveManager.Library = nil
-    SaveManager.Options = {}
+	SaveManager.Folder = "FluentSettings"
+	SaveManager.Ignore = {}
+	SaveManager.Parser = {
+		Toggle = {
+			Save = function(idx, object) 
+				return { type = "Toggle", idx = idx, value = object.Value } 
+			end,
+			Load = function(idx, data)
+				if SaveManager.Options[idx] then 
+					SaveManager.Options[idx]:SetValue(data.value)
+				end
+			end,
+		},
+		Slider = {
+			Save = function(idx, object)
+				return { type = "Slider", idx = idx, value = tostring(object.Value) }
+			end,
+			Load = function(idx, data)
+				if SaveManager.Options[idx] then 
+					SaveManager.Options[idx]:SetValue(data.value)
+				end
+			end,
+		},
+		Dropdown = {
+			Save = function(idx, object)
+				return { type = "Dropdown", idx = idx, value = object.Value, mutli = object.Multi }
+			end,
+			Load = function(idx, data)
+				if SaveManager.Options[idx] then 
+					SaveManager.Options[idx]:SetValue(data.value)
+				end
+			end,
+		},
+		Colorpicker = {
+			Save = function(idx, object)
+				return { type = "Colorpicker", idx = idx, value = object.Value:ToHex(), transparency = object.Transparency }
+			end,
+			Load = function(idx, data)
+				if SaveManager.Options[idx] then 
+					SaveManager.Options[idx]:SetValueRGB(Color3.fromHex(data.value), data.transparency)
+				end
+			end,
+		},
+		Keybind = {
+			Save = function(idx, object)
+				return { type = "Keybind", idx = idx, mode = object.Mode, key = object.Value }
+			end,
+			Load = function(idx, data)
+				if SaveManager.Options[idx] then 
+					SaveManager.Options[idx]:SetValue(data.key, data.mode)
+				end
+			end,
+		},
 
-    -- ---- internal: safe get option with retry -------------------------------
-    function SaveManager:_withOption(idx, fn)
-        if not idx or type(fn) ~= "function" then return end
-        local bag = self.Options or {}
-        if bag[idx] then
-            local ok,err = pcall(fn, bag[idx]); if not ok then warn(err) end
-            return
-        end
-        -- Wait for late-created option (max ~2s)
-        local t0 = os.clock()
-        while os.clock() - t0 < 2 do
-            task.wait(0.05)
-            bag = self.Options or {}
-            if bag[idx] then
-                local ok,err = pcall(fn, bag[idx]); if not ok then warn(err) end
-                return
-            end
-        end
-        -- still not found, skip silently
-    end
+		Input = {
+			Save = function(idx, object)
+				return { type = "Input", idx = idx, text = object.Value }
+			end,
+			Load = function(idx, data)
+				if SaveManager.Options[idx] and type(data.text) == "string" then
+					SaveManager.Options[idx]:SetValue(data.text)
+				end
+			end,
+		},
+	}
 
-    -- ---- internal: apply value to option by type ---------------------------
-    function SaveManager:_applyValue(idx, objOrVal)
-        self:_withOption(idx, function(opt)
-            local t = opt and opt.Type
-            if not t then return end
-            if t == "Toggle" then
-                opt:SetValue(not not (objOrVal and (objOrVal.value~=nil and objOrVal.value or objOrVal)))
-            elseif t == "Input" or t == "Slider" then
-                local v = (type(objOrVal)=="table" and (objOrVal.text or objOrVal.value)) or objOrVal
-                opt:SetValue(v)
-            elseif t == "Dropdown" then
-                local v = (type(objOrVal)=="table" and objOrVal.value) or objOrVal
-                opt:SetValue(v)
-            elseif t == "Keybind" then
-                local key, mode = objOrVal, nil
-                if type(objOrVal)=="table" then key, mode = objOrVal.key, objOrVal.mode end
-                opt:SetValue(key, mode)
-            elseif t == "Colorpicker" then
-                if type(objOrVal)=="table" and objOrVal.value then
-                    opt:SetValueRGB(color3_from_hex(objOrVal.value), objOrVal.transparency)
+	function SaveManager:SetIgnoreIndexes(list)
+		for _, key in next, list do
+			self.Ignore[key] = true
+		end
+	end
+
+	function SaveManager:SetFolder(folder)
+		self.Folder = folder;
+		self:BuildFolderTree()
+	end
+
+	function SaveManager:Save(name)
+		if (not name) then
+			return false, "no config file is selected"
+		end
+
+		local fullPath = self.Folder .. "/settings/" .. name .. ".json"
+
+		local data = {
+			objects = {}
+		}
+
+		for idx, option in next, SaveManager.Options do
+			if not self.Parser[option.Type] then continue end
+			if self.Ignore[idx] then continue end
+
+			table.insert(data.objects, self.Parser[option.Type].Save(idx, option))
+		end	
+
+		local success, encoded = pcall(httpService.JSONEncode, httpService, data)
+		if not success then
+			return false, "failed to encode data"
+		end
+
+		writefile(fullPath, encoded)
+		return true
+	end
+
+	function SaveManager:Load(name)
+		if (not name) then
+			return false, "no config file is selected"
+		end
+		
+		local file = self.Folder .. "/settings/" .. name .. ".json"
+		if not isfile(file) then return false, "invalid file" end
+
+		local success, decoded = pcall(httpService.JSONDecode, httpService, readfile(file))
+		if not success then return false, "decode error" end
+
+		for _, option in next, decoded.objects do
+			if self.Parser[option.type] then
+				task.spawn(function() self.Parser[option.type].Load(option.idx, option) end) -- task.spawn() so the config loading wont get stuck.
+			end
+		end
+
+		return true
+	end
+
+	function SaveManager:IgnoreThemeSettings()
+		self:SetIgnoreIndexes({ 
+			"InterfaceTheme", "AcrylicToggle", "TransparentToggle", "MenuKeybind"
+		})
+	end
+
+	function SaveManager:BuildFolderTree()
+		local paths = {
+			self.Folder,
+			self.Folder .. "/settings"
+		}
+
+		for i = 1, #paths do
+			local str = paths[i]
+			if not isfolder(str) then
+				makefolder(str)
+			end
+		end
+	end
+
+	function SaveManager:RefreshConfigList()
+		local list = listfiles(self.Folder .. "/settings")
+
+		local out = {}
+		for i = 1, #list do
+			local file = list[i]
+			if file:sub(-5) == ".json" then
+				local pos = file:find(".json", 1, true)
+				local start = pos
+
+				local char = file:sub(pos, pos)
+				while char ~= "/" and char ~= "\\" and char ~= "" do
+					pos = pos - 1
+					char = file:sub(pos, pos)
+				end
+
+				if char == "/" or char == "\\" then
+					local name = file:sub(pos + 1, start - 1)
+					if name ~= "options" then
+						table.insert(out, name)
+					end
+				end
+			end
+		end
+		
+		return out
+	end
+
+	function SaveManager:SetLibrary(library)
+		self.Library = library
+        self.Options = library.Options
+	end
+
+	function SaveManager:LoadAutoloadConfig()
+		if isfile(self.Folder .. "/settings/autoload.txt") then
+			local name = readfile(self.Folder .. "/settings/autoload.txt")
+
+			local success, err = self:Load(name)
+			if not success then
+				return self.Library:Notify({
+					Title = "Interface",
+					Content = "Config loader",
+					SubContent = "Failed to load autoload config: " .. err,
+					Duration = 7
+				})
+			end
+
+			self.Library:Notify({
+				Title = "Interface",
+				Content = "Config loader",
+				SubContent = string.format("Auto loaded config %q", name),
+				Duration = 7
+			})
+		end
+	end
+
+	function SaveManager:BuildConfigSection(tab)
+		assert(self.Library, "Must set SaveManager.Library")
+
+		local section = tab:AddSection("Configuration")
+
+		section:AddInput("SaveManager_ConfigName",    { Title = "Config name" })
+		section:AddDropdown("SaveManager_ConfigList", { Title = "Config list", Values = self:RefreshConfigList(), AllowNull = true })
+
+		section:AddButton({
+            Title = "Create config",
+            Callback = function()
+                local name = SaveManager.Options.SaveManager_ConfigName.Value
+
+                if name:gsub(" ", "") == "" then 
+                    return self.Library:Notify({
+						Title = "Interface",
+						Content = "Config loader",
+						SubContent = "Invalid config name (empty)",
+						Duration = 7
+					})
                 end
-            else
-                pcall(function() opt:SetValue(objOrVal) end)
-            end
-        end)
-    end
 
-    -- ---- debounce autosave --------------------------------------------------
-    function SaveManager:QueueAutosave()
-        if self._loading then return end
-        if self._debounce then pcall(task.cancel, self._debounce) end
-        self._debounce = task.spawn(function()
-            task.wait(self._debounceDelay)
-            self._debounce = nil
-            pcall(function() self:Save(self.AUTOSAVE_NAME) end)
-        end)
-    end
-
-    -- ---- hook options -------------------------------------------------------
-    function SaveManager:_HookOption(idx, option)
-        if type(option) ~= "table" then return end
-        local function wrap(method)
-            if type(option[method]) ~= "function" then return end
-            local tag = "__orig_"..method
-            if option[tag] then return end
-            option[tag] = option[method]
-            option[method] = function(self_, ...)
-                local ret = option[tag](self_, ...)
-                if not SaveManager.Ignore[idx] then SaveManager:QueueAutosave() end
-                return ret
-            end
-        end
-        wrap("SetValue")
-        wrap("SetValueRGB")
-        if option.Type == "Dropdown" and type(option.Callback) == "function" then
-            local old = option.Callback
-            option.Callback = function(...)
-                local r = old(...)
-                task.defer(function()
-                    if not SaveManager.Ignore[idx] then SaveManager:QueueAutosave() end
-                end)
-                return r
-            end
-        end
-    end
-
-    function SaveManager:_HookAllOptions()
-        if type(self.Options) ~= "table" then return end
-        for idx, opt in pairs(self.Options) do
-            if type(idx) == "string" and type(opt) == "table" then
-                self:_HookOption(idx, opt)
-            end
-        end
-    end
-
-    -- ---- parsers (for Save/Load structured) --------------------------------
-    SaveManager.Parser = {
-        Toggle = {
-            Save = function(idx, object)
-                local v = (object and object.Value) and not not object.Value or false
-                return { type = "Toggle", idx = idx, value = v }
-            end,
-            Load = function(idx, data)
-                SaveManager:_applyValue(idx, data)
-            end,
-        },
-        Slider = {
-            Save = function(idx, object)
-                return { type = "Slider", idx = idx, value = object and object.Value }
-            end,
-            Load = function(idx, data)
-                SaveManager:_applyValue(idx, data)
-            end,
-        },
-        Dropdown = {
-            Save = function(idx, object)
-                return { type = "Dropdown", idx = idx, value = object and object.Value, multi = (object and (object.Multi or object.MultiSelect)) }
-            end,
-            Load = function(idx, data)
-                SaveManager:_applyValue(idx, data)
-            end,
-        },
-        Colorpicker = {
-            Save = function(idx, object)
-                return { type = "Colorpicker", idx = idx, value = (object and object.Value and color3_to_hex(object.Value)) or nil, transparency = object and object.Transparency }
-            end,
-            Load = function(idx, data)
-                SaveManager:_applyValue(idx, data)
-            end,
-        },
-        Keybind = {
-            Save = function(idx, object)
-                return { type = "Keybind", idx = idx, mode = object and object.Mode, key = object and object.Value }
-            end,
-            Load = function(idx, data)
-                SaveManager:_applyValue(idx, data)
-            end,
-        },
-        Input = {
-            Save = function(idx, object)
-                return { type = "Input", idx = idx, text = object and object.Value }
-            end,
-            Load = function(idx, data)
-                SaveManager:_applyValue(idx, data)
-            end,
-        },
-    }
-
-    -- ---- public: ignore some indexes ---------------------------------------
-    function SaveManager:SetIgnoreIndexes(list)
-        for _, key in next, (list or {}) do self.Ignore[key] = true end
-    end
-
-    -- ---- public: set folder -------------------------------------------------
-    function SaveManager:SetFolder(folder)
-        self.Folder = tostring(folder or "FluentSettings")
-        self:BuildFolderTree()
-    end
-
-    -- ---- save (flat) --------------------------------------------------------
-    function SaveManager:Save(name)
-        if not name or name == "" then return false, "no config file is selected" end
-        self:BuildFolderTree()
-        local fullPath = self.Folder .. "/settings/" .. name .. ".lua"
-        local data = {}
-
-        local opts = self.Options or {}
-        for idx, option in next, opts do
-            if self.Ignore[idx] then goto continue end
-            local P = option and self.Parser[option.Type]
-            if P and P.Save then
-                local ok, obj = pcall(P.Save, idx, option)
-                if ok and type(obj) == "table" then
-                    obj.idx = nil
-                    data[idx] = obj
+                local success, err = self:Save(name)
+                if not success then
+                    return self.Library:Notify({
+						Title = "Interface",
+						Content = "Config loader",
+						SubContent = "Failed to save config: " .. err,
+						Duration = 7
+					})
                 end
+
+				self.Library:Notify({
+					Title = "Interface",
+					Content = "Config loader",
+					SubContent = string.format("Created config %q", name),
+					Duration = 7
+				})
+
+                SaveManager.Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
+                SaveManager.Options.SaveManager_ConfigList:SetValue(nil)
             end
-            ::continue::
-        end
+        })
 
-        local luaText = "return " .. serialize_lua(data, 0)
-        writefile(fullPath, luaText)
-        self._lastSaveTick = os.clock()
-        return true
-    end
+        section:AddButton({Title = "Load config", Callback = function()
+			local name = SaveManager.Options.SaveManager_ConfigList.Value
 
-    -- ---- load (flat-first, json-backcompat) --------------------------------
-    function SaveManager:Load(name)
-        if not name or name == "" then return false, "no config file is selected" end
-        self._loading = true
+			local success, err = self:Load(name)
+			if not success then
+				return self.Library:Notify({
+					Title = "Interface",
+					Content = "Config loader",
+					SubContent = "Failed to load config: " .. err,
+					Duration = 7
+				})
+			end
 
-        -- .lua
-        local fileLua = self.Folder .. "/settings/" .. name .. ".lua"
-        if isfile(fileLua) then
-            local ok, decoded = safe_load_lua_file(fileLua)
-            if not ok or type(decoded) ~= "table" then
-                self._loading = false
-                return false, "invalid lua config"
-            end
+			self.Library:Notify({
+				Title = "Interface",
+				Content = "Config loader",
+				SubContent = string.format("Loaded config %q", name),
+				Duration = 7
+			})
+		end})
 
-            for idx, obj in pairs(decoded) do
-                if type(obj) == "table" and obj.type and self.Parser[obj.type] then
-                    local clone = table_clone(obj); clone.idx = idx
-                    task.spawn(function() self.Parser[obj.type].Load(idx, clone) end)
-                else
-                    task.spawn(function() self:_applyValue(idx, obj) end)
-                end
-            end
-            task.delay(0.2, function() self._loading = false end)
-            return true
-        end
+		section:AddButton({Title = "Overwrite config", Callback = function()
+			local name = SaveManager.Options.SaveManager_ConfigList.Value
 
-        -- .json backcompat
-        local fileJson = self.Folder .. "/settings/" .. name .. ".json"
-        if isfile(fileJson) then
-            local ok, decoded = pcall(function() return httpService:JSONDecode(readfile(fileJson)) end)
-            if not ok or type(decoded) ~= "table" then
-                self._loading = false
-                return false, "decode error"
-            end
-            if decoded.sections and type(decoded.sections) == "table" then
-                for _, pack in pairs(decoded.sections) do
-                    if pack and type(pack.objects) == "table" then
-                        for _, option in next, pack.objects do
-                            if option and option.type and self.Parser[option.type] then
-                                task.spawn(function() self.Parser[option.type].Load(option.idx, option) end)
-                            end
-                        end
-                    end
-                end
-            elseif decoded.objects and type(decoded.objects) == "table" then
-                for _, option in next, decoded.objects do
-                    if option and option.type and self.Parser[option.type] then
-                        task.spawn(function() self.Parser[option.type].Load(option.idx, option) end)
-                    end
-                end
-            end
-            task.delay(0.2, function() self._loading = false end)
-            return true
-        end
+			local success, err = self:Save(name)
+			if not success then
+				return self.Library:Notify({
+					Title = "Interface",
+					Content = "Config loader",
+					SubContent = "Failed to overwrite config: " .. err,
+					Duration = 7
+				})
+			end
 
-        self._loading = false
-        return false, "invalid file"
-    end
+			self.Library:Notify({
+				Title = "Interface",
+				Content = "Config loader",
+				SubContent = string.format("Overwrote config %q", name),
+				Duration = 7
+			})
+		end})
 
-    -- ---- apply getgenv().Config (flat/grouped) ------------------------------
-    function SaveManager:ApplyFlatConfig(cfg)
-        if type(cfg) ~= "table" then return end
-        local function setIdx(idx, val) self:_applyValue(idx, val) end
+		section:AddButton({Title = "Refresh list", Callback = function()
+			SaveManager.Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
+			SaveManager.Options.SaveManager_ConfigList:SetValue(nil)
+		end})
 
-        if type(cfg.Toggles)   == "table" then for k,v in pairs(cfg.Toggles)   do setIdx(k,v) end end
-        if type(cfg.Inputs)    == "table" then for k,v in pairs(cfg.Inputs)    do setIdx(k,v) end end
-        if type(cfg.Sliders)   == "table" then for k,v in pairs(cfg.Sliders)   do setIdx(k,v) end end
-        if type(cfg.Dropdowns) == "table" then for k,v in pairs(cfg.Dropdowns) do setIdx(k,v) end end
-        if type(cfg.Keybinds)  == "table" then for k,v in pairs(cfg.Keybinds)  do setIdx(k,v) end end
-        if type(cfg.Colors)    == "table" then for k,v in pairs(cfg.Colors)    do setIdx(k,v) end end
+		local AutoloadButton
+		AutoloadButton = section:AddButton({Title = "Set as autoload", Description = "Current autoload config: none", Callback = function()
+			local name = SaveManager.Options.SaveManager_ConfigList.Value
+			writefile(self.Folder .. "/settings/autoload.txt", name)
+			AutoloadButton:SetDesc("Current autoload config: " .. name)
+			self.Library:Notify({
+				Title = "Interface",
+				Content = "Config loader",
+				SubContent = string.format("Set %q to auto load", name),
+				Duration = 7
+			})
+		end})
 
-        for k,v in pairs(cfg) do
-            if k~="Toggles" and k~="Inputs" and k~="Sliders" and k~="Dropdowns" and k~="Keybinds" and k~="Colors" then
-                setIdx(k, v)
-            end
-        end
-    end
+		if isfile(self.Folder .. "/settings/autoload.txt") then
+			local name = readfile(self.Folder .. "/settings/autoload.txt")
+			AutoloadButton:SetDesc("Current autoload config: " .. name)
+		end
 
-    function SaveManager:LoadWithPriority(preferGetgenv)
-        self._loading = true
-        local userCfg = rawget(getgenv(), "Config")
+		SaveManager:SetIgnoreIndexes({ "SaveManager_ConfigList", "SaveManager_ConfigName" })
+	end
 
-        if preferGetgenv and type(userCfg) == "table" then
-            self:ApplyFlatConfig(userCfg)
-            pcall(function() self:Load(self.AUTOSAVE_NAME) end)
-        else
-            pcall(function() self:Load(self.AUTOSAVE_NAME) end)
-            if type(userCfg) == "table" then self:ApplyFlatConfig(userCfg) end
-        end
-
-        task.delay(0.2, function() self._loading = false end)
-    end
-
-    -- ---- infra / ui ---------------------------------------------------------
-    function SaveManager:IgnoreThemeSettings()
-        self:SetIgnoreIndexes({ "InterfaceTheme", "AcrylicToggle", "TransparentToggle", "MenuKeybind" })
-    end
-
-    function SaveManager:BuildFolderTree()
-        local base = tostring(self.Folder or "FluentSettings")
-        local paths = { base, base .. "/settings" }
-        for _, p in ipairs(paths) do
-            if not isfolder(p) then makefolder(p) end
-        end
-    end
-
-    function SaveManager:RefreshConfigList()
-        self:BuildFolderTree()
-        local dir = self.Folder .. "/settings"
-        local ok, list = pcall(listfiles, dir)
-        if not ok or type(list) ~= "table" then return {} end
-        local out = {}
-        for _, file in ipairs(list) do
-            local isLua = file:sub(-4) == ".lua"
-            local isJson = file:sub(-5) == ".json"
-            if isLua or isJson then
-                local endpos = isLua and file:find(".lua", 1, true) or file:find(".json", 1, true)
-                local pos = endpos
-                local char = file:sub(pos, pos)
-                while char ~= "/" and char ~= "\\" and char ~= "" do
-                    pos = pos - 1
-                    char = file:sub(pos, pos)
-                end
-                if char == "/" or char == "\\" then
-                    local name = file:sub(pos + 1, (endpos - 1))
-                    if name ~= "options" then table.insert(out, name) end
-                end
-            end
-        end
-        table.sort(out)
-        return out
-    end
-
-    function SaveManager:SetLibrary(library)
-        self.Library = library
-        self.Options = (library and library.Options) or {}
-        -- Nếu options được tạo SAU khi SetLibrary, hãy gọi lại _HookAllOptions() sau khi bạn add xong options.
-        self:_HookAllOptions()
-    end
-
-    function SaveManager:LoadAutoloadConfig()
-        local p = self.Folder .. "/settings/autoload.txt"
-        if isfile(p) then
-            local name = readfile(p)
-            local ok, err = self:Load(name)
-            if not ok and self.Library and self.Library.Notify then
-                self.Library:Notify({
-                    Title = "Interface",
-                    Content = "Config loader",
-                    SubContent = "Failed to load autoload config: " .. tostring(err),
-                    Duration = 7
-                })
-            elseif self.Library and self.Library.Notify then
-                self.Library:Notify({
-                    Title = "Interface",
-                    Content = "Config loader",
-                    SubContent = string.format("Auto loaded config %q", name),
-                    Duration = 7
-                })
-            end
-        end
-    end
-
-    function SaveManager:BuildConfigSection(tab)
-        assert(self.Library, "Must set SaveManager.Library")
-        local section = tab:AddSection("Configuration")
-        section:AddInput("SaveManager_ConfigName",    { Title = "Config name" })
-        section:AddDropdown("SaveManager_ConfigList", { Title = "Config list", Values = self:RefreshConfigList(), AllowNull = true })
-
-        section:AddButton({ Title = "Create config", Callback = function()
-            local name = SaveManager.Options.SaveManager_ConfigName and SaveManager.Options.SaveManager_ConfigName.Value or ""
-            if name:gsub(" ", "") == "" then
-                if self.Library and self.Library.Notify then
-                    self.Library:Notify({ Title = "Interface", Content = "Config loader", SubContent = "Invalid config name (empty)", Duration = 7 })
-                end
-                return
-            end
-            local ok, err = self:Save(name)
-            if not ok and self.Library and self.Library.Notify then
-                self.Library:Notify({ Title = "Interface", Content = "Config loader", SubContent = "Failed to save config: " .. tostring(err), Duration = 7 })
-            elseif self.Library and self.Library.Notify then
-                self.Library:Notify({ Title = "Interface", Content = "Config loader", SubContent = string.format("Created config %q", name), Duration = 7 })
-            end
-            local dd = SaveManager.Options.SaveManager_ConfigList
-            if dd and dd.SetValues then dd:SetValues(self:RefreshConfigList()); dd:SetValue(nil) end
-        end})
-
-        section:AddButton({ Title = "Load config", Callback = function()
-            local dd = SaveManager.Options.SaveManager_ConfigList
-            local name = dd and dd.Value
-            local ok, err = self:Load(name)
-            if not ok and self.Library and self.Library.Notify then
-                self.Library:Notify({ Title = "Interface", Content = "Config loader", SubContent = "Failed to load config: " .. tostring(err), Duration = 7 })
-            elseif self.Library and self.Library.Notify then
-                self.Library:Notify({ Title = "Interface", Content = "Config loader", SubContent = string.format("Loaded config %q", tostring(name)), Duration = 7 })
-            end
-        end})
-
-        section:AddButton({ Title = "Overwrite config", Callback = function()
-            local dd = SaveManager.Options.SaveManager_ConfigList
-            local name = dd and dd.Value
-            local ok, err = self:Save(name)
-            if not ok and self.Library and self.Library.Notify then
-                self.Library:Notify({ Title = "Interface", Content = "Config loader", SubContent = "Failed to overwrite config: " .. tostring(err), Duration = 7 })
-            elseif self.Library and self.Library.Notify then
-                self.Library:Notify({ Title = "Interface", Content = "Config loader", SubContent = string.format("Overwrote config %q", tostring(name)), Duration = 7 })
-            end
-        end})
-
-        section:AddButton({ Title = "Refresh list", Callback = function()
-            local dd = SaveManager.Options.SaveManager_ConfigList
-            if dd and dd.SetValues then dd:SetValues(self:RefreshConfigList()); dd:SetValue(nil) end
-        end})
-
-        local AutoloadButton
-        AutoloadButton = section:AddButton({ Title = "Set as autoload", Description = "Current autoload config: none", Callback = function()
-            local dd = SaveManager.Options.SaveManager_ConfigList
-            local name = dd and dd.Value or ""
-            writefile(self.Folder .. "/settings/autoload.txt", name)
-            if AutoloadButton and AutoloadButton.SetDesc then AutoloadButton:SetDesc("Current autoload config: " .. name) end
-            if self.Library and self.Library.Notify then
-                self.Library:Notify({ Title = "Interface", Content = "Config loader", SubContent = string.format("Set %q to auto load", name), Duration = 7 })
-            end
-        end})
-
-        local p = self.Folder .. "/settings/autoload.txt"
-        if isfile(p) and AutoloadButton and AutoloadButton.SetDesc then
-            local name = readfile(p)
-            AutoloadButton:SetDesc("Current autoload config: " .. name)
-        end
-
-        self:SetIgnoreIndexes({ "SaveManager_ConfigList", "SaveManager_ConfigName" })
-    end
-
-    SaveManager:BuildFolderTree()
+	SaveManager:BuildFolderTree()
 end
 
 return SaveManager

@@ -1,4 +1,4 @@
--- SaveManager.lua (gốc + bổ sung autosave.lua theo hành động Toggle/Dropdown/Input/Slider)
+-- SaveManager.lua (Fluent + autosave.lua + LoadWithPriority)
 local httpService = game:GetService("HttpService")
 
 local SaveManager = {} do
@@ -67,24 +67,17 @@ local SaveManager = {} do
 		},
 	}
 
-	-- ==================== AUTOSAVE (thêm mới) ====================
+	---------------------------------------------------------------------
+	-- AUTOSAVE SECTION (save to autosave.lua)
+	---------------------------------------------------------------------
 	SaveManager.AutoFileName = "autosave.lua"
-	SaveManager._suppressSave = false   -- InterfaceManager sẽ bật khi reset toggle lúc GUI bị xoá
-	SaveManager._debug = false
-
-	local function dbg(...)
-		if SaveManager._debug then print("[SaveManager]", ...) end
-	end
+	SaveManager._suppressSave = false
 
 	local function ensureFolders()
-		local paths = {
-			SaveManager.Folder,
-			SaveManager.Folder .. "/settings"
-		}
+		local paths = {SaveManager.Folder, SaveManager.Folder .. "/settings"}
 		for _, p in ipairs(paths) do
 			if not isfolder(p) then
-				local ok, err = pcall(makefolder, p)
-				if not ok then warn("[SaveManager] makefolder failed:", p, err) end
+				pcall(makefolder, p)
 			end
 		end
 	end
@@ -104,6 +97,7 @@ local SaveManager = {} do
 		for i=1,n do if tbl[i]==nil then return false end end
 		return true
 	end
+
 	local function serialize_lua(v, indent)
 		indent = indent or ""
 		local t = type(v)
@@ -134,16 +128,15 @@ local SaveManager = {} do
 
 	local function write_lua_table(path, tbl)
 		local payload = "return " .. serialize_lua(tbl) .. "\n"
-		local ok, err = pcall(writefile, path, payload)
-		if not ok then warn("[SaveManager] writefile failed:", err) end
+		pcall(writefile, path, payload)
 	end
 
 	local function read_lua_table(path)
 		if not isfile(path) then return nil end
 		local ok, content = pcall(readfile, path)
-		if not ok or type(content)~="string" then return nil end
-		local fn, e = loadstring(content)
-		if not fn then warn("[SaveManager] loadstring autosave.lua failed:", e) return nil end
+		if not ok then return nil end
+		local fn = loadstring(content)
+		if not fn then return nil end
 		local ok2, res = pcall(fn)
 		if not ok2 or type(res)~="table" then return nil end
 		return res
@@ -155,20 +148,10 @@ local SaveManager = {} do
 	end
 
 	local function getOptionValue(opt)
-		-- ưu tiên field thường gặp
 		local keys = {"Value","CurrentValue","State","Text","Number","Selected"}
 		for _,k in ipairs(keys) do
 			local v = rawget(opt, k)
 			if v ~= nil then return v end
-		end
-		-- thử getter
-		local getters = {"GetValue","Get","GetState","GetText","GetNumber","GetSelected"}
-		for _,m in ipairs(getters) do
-			local f = rawget(opt, m)
-			if typeof(f)=="function" then
-				local ok, v = pcall(f, opt)
-				if ok then return v end
-			end
 		end
 		return nil
 	end
@@ -178,56 +161,30 @@ local SaveManager = {} do
 		for _,m in ipairs(setters) do
 			local f = rawget(opt, m)
 			if typeof(f)=="function" then
-				local ok = pcall(f, opt, val)
-				if ok then return true end
-			end
-		end
-		-- fallback gán field
-		local keys = {"Value","CurrentValue","State","Text","Number","Selected"}
-		for _,k in ipairs(keys) do
-			if rawget(opt, k) ~= nil then
-				opt[k] = val
-				local oc = rawget(opt, "OnChanged")
-				if typeof(oc)=="function" then pcall(oc, opt) end
+				pcall(f, opt, val)
 				return true
 			end
 		end
 		return false
 	end
 
-	function SaveManager:GetAutosave()
-		ensureFolders()
-		local p = autosavePath()
-		if not isfile(p) then write_lua_table(p, {}) end
-		return read_lua_table(p) or {}
-	end
-
-	function SaveManager:_WriteAutosave(tbl)
-		ensureFolders()
-		write_lua_table(autosavePath(), tbl or {})
-		dbg("Autosave ->", autosavePath())
-	end
-
 	function SaveManager:_SaveCurrentOptionsToAutosave()
 		if self._suppressSave then return end
-		if not self.Options or type(self.Options)~="table" then return end
+		if not self.Options then return end
 		local out = {}
 		for key, opt in pairs(self.Options) do
-			if not self.Ignore[key] and type(opt)=="table" and isSavableType(opt) then
-				local v = getOptionValue(opt)
-				if v ~= nil then out[key] = v end
+			if not self.Ignore[key] and isSavableType(opt) then
+				out[key] = getOptionValue(opt)
 			end
 		end
-		self:_WriteAutosave(out)
+		write_lua_table(autosavePath(), out)
 	end
 
 	function SaveManager:_ApplyAutosaveToCurrentOptions()
-		local data = self:GetAutosave()
-		if type(data)~="table" then return end
-		if not self.Options or type(self.Options)~="table" then return end
-
+		if not self.Options then return end
+		local data = read_lua_table(autosavePath()) or {}
 		self._suppressSave = true
-		for key, val in pairs(data) do
+		for key,val in pairs(data) do
 			local opt = self.Options[key]
 			if opt and isSavableType(opt) then
 				pcall(setOptionValue, opt, val)
@@ -236,69 +193,46 @@ local SaveManager = {} do
 		task.defer(function() self._suppressSave = false end)
 	end
 
-	local hooked = {}
 	function SaveManager:_HookAutosave()
 		task.spawn(function()
 			while task.wait(0.25) do
-				local opts = self.Options
-				if type(opts)~="table" then continue end
-				for key, opt in pairs(opts) do
-					if type(opt)=="table" and isSavableType(opt) and not hooked[opt] then
-						hooked[opt] = true
-
-						-- áp state đã lưu (nếu có) ngay khi phát hiện option mới
-						local savedAll = self:GetAutosave()
-						if savedAll[key] ~= nil then
-							self._suppressSave = true
-							pcall(setOptionValue, opt, savedAll[key])
-							task.defer(function() self._suppressSave = false end)
-						end
-
-						local function saveNow()
-							if self._suppressSave then return end
-							-- lưu đúng "ảnh" toàn bộ options để tránh mất đồng bộ
-							SaveManager:_SaveCurrentOptionsToAutosave()
-						end
-
-						-- cố gắng đăng ký theo kiểu method: opt:OnChanged(cb)
+				if not self.Options then continue end
+				for _,opt in pairs(self.Options) do
+					if isSavableType(opt) and not opt._hooked then
+						opt._hooked = true
 						if typeof(opt.OnChanged)=="function" then
-							local ok = pcall(function()
-								return opt:OnChanged(function(...) saveNow() end)
-							end)
-							if not ok then
-								-- wrap field function
-								local old = opt.OnChanged
-								opt.OnChanged = function(...)
-									local ok2, err = pcall(old, ...)
-									if not ok2 then warn("[SaveManager] OnChanged error:", err) end
-									saveNow()
+							local old = opt.OnChanged
+							opt.OnChanged = function(...)
+								pcall(old, ...)
+								if not self._suppressSave then
+									self:_SaveCurrentOptionsToAutosave()
 								end
 							end
 						end
-
-						-- Fallback polling (bắt mọi thay đổi nếu lib không gọi OnChanged)
-						task.spawn(function()
-							local function dump(v)
-								local ok, s = pcall(httpService.JSONEncode, httpService, v)
-								return ok and s or tostring(v)
-							end
-							local last = dump(getOptionValue(opt))
-							while hooked[opt] do
-								task.wait(0.5)
-								local cur = dump(getOptionValue(opt))
-								if cur ~= last and not SaveManager._suppressSave then
-                                    last = cur
-									SaveManager:_SaveCurrentOptionsToAutosave()
-								end
-							end
-						end)
 					end
 				end
 			end
 		end)
 	end
-	-- ==================== /AUTOSAVE ====================
 
+	-- Add LoadWithPriority compatibility
+	function SaveManager:LoadWithPriority()
+		ensureFolders()
+		if not isfile(autosavePath()) then
+			write_lua_table(autosavePath(), {})
+		end
+		if self and type(self.Options) == "table" then
+			self:_ApplyAutosaveToCurrentOptions()
+			self:_HookAutosave()
+			if not self._suppressSave then
+				self:_SaveCurrentOptionsToAutosave()
+			end
+		end
+	end
+
+	---------------------------------------------------------------------
+	-- ORIGINAL SAVE MANAGER FUNCTIONS
+	---------------------------------------------------------------------
 	function SaveManager:SetIgnoreIndexes(list)
 		for _, key in next, list do
 			self.Ignore[key] = true
@@ -307,258 +241,53 @@ local SaveManager = {} do
 
 	function SaveManager:SetFolder(folder)
 		self.Folder = folder
-		self:BuildFolderTree()
-		-- init autosave.lua rỗng nếu chưa có
+		ensureFolders()
 		if not isfile(autosavePath()) then
 			write_lua_table(autosavePath(), {})
 		end
 	end
 
-	function SaveManager:Save(name)
-		if (not name) then
-			return false, "no config file is selected"
-		end
-
-		local fullPath = self.Folder .. "/settings/" .. name .. ".json"
-
-		local data = {
-			objects = {}
-		}
-
-		for idx, option in next, SaveManager.Options do
-			if not self.Parser[option.Type] then continue end
-			if self.Ignore[idx] then continue end
-
-			table.insert(data.objects, self.Parser[option.Type].Save(idx, option))
-		end	
-
-		local success, encoded = pcall(httpService.JSONEncode, httpService, data)
-		if not success then
-			return false, "failed to encode data"
-		end
-
-		writefile(fullPath, encoded)
-		return true
-	end
-
-	function SaveManager:Load(name)
-		if (not name) then
-			return false, "no config file is selected"
-		end
-		
-		local file = self.Folder .. "/settings/" .. name .. ".json"
-		if not isfile(file) then return false, "invalid file" end
-
-		local success, decoded = pcall(httpService.JSONDecode, httpService, readfile(file))
-		if not success then return false, "decode error" end
-
-		for _, option in next, decoded.objects do
-			if self.Parser[option.type] then
-				task.spawn(function() self.Parser[option.type].Load(option.idx, option) end)
-			end
-		end
-
-		-- đồng bộ autosave theo ảnh sau khi Load (tùy chọn, giúp autosave.lua phản ánh state mới nhất)
-		self:_SaveCurrentOptionsToAutosave()
-
-		return true
-	end
-
-	function SaveManager:IgnoreThemeSettings()
-		self:SetIgnoreIndexes({ 
-			"InterfaceTheme", "AcrylicToggle", "TransparentToggle", "MenuKeybind"
-		})
-	end
-
-	function SaveManager:BuildFolderTree()
-		local paths = {
-			self.Folder,
-			self.Folder .. "/settings"
-		}
-
-		for i = 1, #paths do
-			local str = paths[i]
-			if not isfolder(str) then
-				makefolder(str)
-			end
-		end
-	end
-
-	function SaveManager:RefreshConfigList()
-		local list = listfiles(self.Folder .. "/settings")
-
-		local out = {}
-		for i = 1, #list do
-			local file = list[i]
-			if file:sub(-5) == ".json" then
-				local pos = file:find(".json", 1, true)
-				local start = pos
-
-				local char = file:sub(pos, pos)
-				while char ~= "/" and char ~= "\\" and char ~= "" do
-					pos = pos - 1
-					char = file:sub(pos, pos)
-				end
-
-				if char == "/" or char == "\\" then
-					local name = file:sub(pos + 1, start - 1)
-					if name ~= "options" then
-						table.insert(out, name)
-					end
-				end
-			end
-		end
-		
-		return out
-	end
-
-	function SaveManager:SetLibrary(library)
-		self.Library = library
-        self.Options = library.Options
-
-		-- áp autosave vào options hiện có & bắt đầu hook autosave
+	function SaveManager:SetLibrary(lib)
+		self.Library = lib
+		self.Options = lib.Options
 		self:_ApplyAutosaveToCurrentOptions()
 		self:_HookAutosave()
 	end
 
-	function SaveManager:LoadAutoloadConfig()
-		if isfile(self.Folder .. "/settings/autoload.txt") then
-			local name = readfile(self.Folder .. "/settings/autoload.txt")
+	function SaveManager:Save(name)
+		if not name then return false, "no config name" end
+		local fullPath = self.Folder .. "/settings/" .. name .. ".json"
+		local data = { objects = {} }
 
-			local success, err = self:Load(name)
-			if not success then
-				return self.Library:Notify({
-					Title = "Interface",
-					Content = "Config loader",
-					SubContent = "Failed to load autoload config: " .. err,
-					Duration = 7
-				})
+		for idx,opt in pairs(self.Options) do
+			if self.Parser[opt.Type] and not self.Ignore[idx] then
+				table.insert(data.objects, self.Parser[opt.Type].Save(idx, opt))
 			end
-
-			self.Library:Notify({
-				Title = "Interface",
-				Content = "Config loader",
-				SubContent = string.format("Auto loaded config %q", name),
-				Duration = 7
-			})
-		end
-	end
-
-	function SaveManager:BuildConfigSection(tab)
-		assert(self.Library, "Must set SaveManager.Library")
-
-		local section = tab:AddSection("Configuration")
-
-		section:AddInput("SaveManager_ConfigName",    { Title = "Config name" })
-		section:AddDropdown("SaveManager_ConfigList", { Title = "Config list", Values = self:RefreshConfigList(), AllowNull = true })
-
-		section:AddButton({
-            Title = "Create config",
-            Callback = function()
-                local name = SaveManager.Options.SaveManager_ConfigName.Value
-
-                if name:gsub(" ", "") == "" then 
-                    return self.Library:Notify({
-						Title = "Interface",
-						Content = "Config loader",
-						SubContent = "Invalid config name (empty)",
-						Duration = 7
-					})
-                end
-
-                local success, err = self:Save(name)
-                if not success then
-                    return self.Library:Notify({
-						Title = "Interface",
-						Content = "Config loader",
-						SubContent = "Failed to save config: " .. err,
-						Duration = 7
-					})
-                end
-
-				self.Library:Notify({
-					Title = "Interface",
-					Content = "Config loader",
-					SubContent = string.format("Created config %q", name),
-					Duration = 7
-				})
-
-                SaveManager.Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
-                SaveManager.Options.SaveManager_ConfigList:SetValue(nil)
-            end
-        })
-
-        section:AddButton({Title = "Load config", Callback = function()
-			local name = SaveManager.Options.SaveManager_ConfigList.Value
-
-			local success, err = self:Load(name)
-			if not success then
-				return self.Library:Notify({
-					Title = "Interface",
-					Content = "Config loader",
-					SubContent = "Failed to load config: " .. err,
-					Duration = 7
-				})
-			end
-
-			self.Library:Notify({
-				Title = "Interface",
-				Content = "Config loader",
-				SubContent = string.format("Loaded config %q", name),
-				Duration = 7
-			})
-		end})
-
-		section:AddButton({Title = "Overwrite config", Callback = function()
-			local name = SaveManager.Options.SaveManager_ConfigList.Value
-
-			local success, err = self:Save(name)
-			if not success then
-				return self.Library:Notify({
-					Title = "Interface",
-					Content = "Config loader",
-					SubContent = "Failed to overwrite config: " .. err,
-					Duration = 7
-				})
-			end
-
-			self.Library:Notify({
-				Title = "Interface",
-				Content = "Config loader",
-				SubContent = string.format("Overwrote config %q", name),
-				Duration = 7
-			})
-		end})
-
-		section:AddButton({Title = "Refresh list", Callback = function()
-			SaveManager.Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
-			SaveManager.Options.SaveManager_ConfigList:SetValue(nil)
-		end})
-
-		local AutoloadButton
-		AutoloadButton = section:AddButton({Title = "Set as autoload", Description = "Current autoload config: none", Callback = function()
-			local name = SaveManager.Options.SaveManager_ConfigList.Value
-			writefile(self.Folder .. "/settings/autoload.txt", name)
-			AutoloadButton:SetDesc("Current autoload config: " .. name)
-			self.Library:Notify({
-				Title = "Interface",
-				Content = "Config loader",
-				SubContent = string.format("Set %q to auto load", name),
-				Duration = 7
-			})
-		end})
-
-		if isfile(self.Folder .. "/settings/autoload.txt") then
-			local name = readfile(self.Folder .. "/settings/autoload.txt")
-			AutoloadButton:SetDesc("Current autoload config: " .. name)
 		end
 
-		SaveManager:SetIgnoreIndexes({ "SaveManager_ConfigList", "SaveManager_ConfigName" })
+		local ok, encoded = pcall(httpService.JSONEncode, httpService, data)
+		if ok then writefile(fullPath, encoded) end
+		return ok
 	end
 
-	SaveManager:BuildFolderTree()
-	-- đảm bảo autosave tồn tại ngay lập tức
-	if not isfile(autosavePath()) then write_lua_table(autosavePath(), {}) end
+	function SaveManager:Load(name)
+		if not name then return false, "no config name" end
+		local file = self.Folder .. "/settings/" .. name .. ".json"
+		if not isfile(file) then return false, "invalid file" end
+
+		local ok, decoded = pcall(httpService.JSONDecode, httpService, readfile(file))
+		if not ok then return false, "decode failed" end
+
+		for _, opt in pairs(decoded.objects) do
+			if self.Parser[opt.type] then
+				task.spawn(function()
+					self.Parser[opt.type].Load(opt.idx, opt)
+				end)
+			end
+		end
+		self:_SaveCurrentOptionsToAutosave()
+		return true
+	end
 end
 
 return SaveManager

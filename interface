@@ -9,34 +9,6 @@ local InterfaceManager = {} do
         MenuKeybind = "LeftControl"
     }
 
-    local function _resetAllToggles(Library)
-        local bags = {}
-        if typeof(Library) == "table" and typeof(Library.Flags) == "table" then
-            table.insert(bags, Library.Flags)
-        end
-        if typeof(Library) == "table" and typeof(Library.Options) == "table" then
-            table.insert(bags, Library.Options)
-        end
-        for _, bag in ipairs(bags) do
-            for _, flag in pairs(bag) do
-                if typeof(flag) == "table" and (flag.Type == "Toggle" or flag.Type == "toggle") and typeof(flag.SetValue) == "function" then
-                    pcall(function() flag:SetValue(false) end)
-                end
-            end
-        end
-    end
-
-    local function _attachAutoReset(Library)
-        local gui = Library and Library.GUI
-        if not gui then return end
-        if gui.Destroying then
-            gui.Destroying:Connect(function() _resetAllToggles(Library) end)
-        end
-        gui.AncestryChanged:Connect(function(_, parent)
-            if parent == nil then _resetAllToggles(Library) end
-        end)
-    end
-
     function InterfaceManager:SetFolder(folder)
 		self.Folder = folder;
 		self:BuildFolderTree()
@@ -44,17 +16,19 @@ local InterfaceManager = {} do
 
     function InterfaceManager:SetLibrary(library)
 		self.Library = library
-        _attachAutoReset(library)
 	end
 
     function InterfaceManager:BuildFolderTree()
 		local paths = {}
+
 		local parts = self.Folder:split("/")
 		for idx = 1, #parts do
 			paths[#paths + 1] = table.concat(parts, "/", 1, idx)
 		end
+
 		table.insert(paths, self.Folder)
 		table.insert(paths, self.Folder .. "/settings")
+
 		for i = 1, #paths do
 			local str = paths[i]
 			if not isfolder(str) then
@@ -72,6 +46,7 @@ local InterfaceManager = {} do
         if isfile(path) then
             local data = readfile(path)
             local success, decoded = pcall(httpService.JSONDecode, httpService, data)
+
             if success then
                 for i, v in next, decoded do
                     InterfaceManager.Settings[i] = v
@@ -103,36 +78,93 @@ local InterfaceManager = {} do
 
         InterfaceTheme:SetValue(Settings.Theme)
 	
-		if Library.UseAcrylic then
-			section:AddToggle("AcrylicToggle", {
-				Title = "Acrylic",
-				Description = "The blurred background requires graphic quality 8+",
-				Default = Settings.Acrylic,
-				Callback = function(Value)
-					Library:ToggleAcrylic(Value)
-                    Settings.Acrylic = Value
-                    InterfaceManager:SaveSettings()
-				end
-			})
-		end
-	
-		section:AddToggle("TransparentToggle", {
-			Title = "Transparency",
-			Description = "Makes the interface transparent.",
-			Default = Settings.Transparency,
-			Callback = function(Value)
-				Library:ToggleTransparency(Value)
-				Settings.Transparency = Value
-                InterfaceManager:SaveSettings()
-			end
-		})
-	
 		local MenuKeybind = section:AddKeybind("MenuKeybind", { Title = "Minimize Bind", Default = Settings.MenuKeybind })
 		MenuKeybind:OnChanged(function()
 			Settings.MenuKeybind = MenuKeybind.Value
             InterfaceManager:SaveSettings()
 		end)
 		Library.MinimizeKeybind = MenuKeybind
+
+        local VIM = game:GetService("VirtualInputManager")
+        local UIS = game:GetService("UserInputService")
+        local TweenService = game:GetService("TweenService")
+
+        local function uiRoot()
+            local ok, ui = pcall(function() return gethui and gethui() end)
+            return (ok and typeof(ui) == "Instance" and ui) or game:GetService("CoreGui")
+        end
+	local parent = uiRoot()
+
+	-- Nếu đã có GUI cũ, xóa đi
+	local old = parent:FindFirstChild("Fluent_CtrlSquare")
+	if old then
+    	old:Destroy()
+	end
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "Meo_Button"
+        gui.IgnoreGuiInset = true
+        gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+        gui.ResetOnSpawn = false
+        gui.Parent = uiRoot()
+
+        local btn = Instance.new("ImageButton")
+        btn.Name = "Buttonn"
+        btn.Size = UDim2.fromOffset(50, 50)
+        btn.AnchorPoint = Vector2.new(1, 1)
+        btn.Position = UDim2.new(1, -20, 1, -20)
+        btn.BackgroundColor3 = Color3.fromRGB(44, 44, 44)
+        btn.Image = "rbxassetid://138537648998329"
+        btn.ScaleType = Enum.ScaleType.Fit
+        btn.AutoButtonColor = true
+        btn.Parent = gui
+
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
+        local stroke = Instance.new("UIStroke", btn)
+        stroke.Thickness = 1
+        stroke.Color = Color3.fromRGB(200, 150, 180)
+
+        local dragging, dragStart, startPos
+        btn.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+                dragStart = input.Position
+                startPos = btn.Position
+            end
+        end)
+        UIS.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local delta = input.Position - dragStart
+                btn.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + delta.X,
+                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                )
+            end
+        end)
+        UIS.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+            end
+        end)
+
+        local function slimeEffect()
+            local tweenIn = TweenService:Create(btn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Size = UDim2.fromOffset(44, 44)
+            })
+            local tweenOut = TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Size = UDim2.fromOffset(50, 50)
+            })
+            tweenIn:Play()
+            tweenIn.Completed:Wait()
+            tweenOut:Play()
+        end
+
+        btn.MouseButton1Click:Connect(function()
+            slimeEffect()
+            local key = Enum.KeyCode[Settings.MenuKeybind] or Enum.KeyCode.LeftControl
+            VIM:SendKeyEvent(true, key, false, game)
+            task.wait(0.05)
+            VIM:SendKeyEvent(false, key, false, game)
+        end)
     end
 end
 

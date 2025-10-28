@@ -1,152 +1,153 @@
--- SaveManager.lua 321
+-- SaveManager.lua (stable autosave: no empty overwrite, lua-serializer, ifaceBlock)
 local HttpService = game:GetService("HttpService")
 
 local SaveManager = {} do
     SaveManager.Folder = "FluentScriptHub/specific-game"
     SaveManager.FileName = "autosave.lua"
+
     SaveManager.Library = nil
     SaveManager.Options = {}
+    SaveManager.Ignore  = {}
     SaveManager._suppressSave = false
-    SaveManager._ifaceBlock = 0
+    SaveManager._ifaceBlock   = 0
+    SaveManager._debug        = false
 
-    ---------------------------------------------------------------------
-    -- 🧱 Utility
-    local function ensureFolder(path)
-        if not isfolder(path) then
-            local ok, err = pcall(makefolder, path)
-            if not ok then warn("[SaveManager] makefolder failed:", err) end
-        end
-    end
+    -- ===== utils =====
+    local function dbg(...) if SaveManager._debug then print("[SaveManager]", ...) end end
 
+    local function ensureFolder(p) if not isfolder(p) then pcall(makefolder,p) end end
+    local function autosavePath() return SaveManager.Folder.."/"..SaveManager.FileName end
     local function ensureFile(path)
-        if not isfile(path) then
-            local ok, err = pcall(writefile, path, "return {}")
-            if not ok then warn("[SaveManager] init autosave.lua failed:", err) end
-        end
+        if not isfile(path) then pcall(writefile, path, "return {}\n") end
     end
 
-    local function autosavePath()
-        return SaveManager.Folder .. "/" .. SaveManager.FileName
+    -- Lua table serializer (không dùng JSON)
+    local function serialize(val, indent)
+        indent = indent or ""
+        local t = typeof(val)
+        if t=="nil" then return "nil"
+        elseif t=="boolean" or t=="number" then return tostring(val)
+        elseif t=="string" then return string.format("%q", val)
+        elseif t=="table" then
+            local nextIndent = indent .. "  "
+            local parts = {}
+            for k,v in pairs(val) do
+                local key
+                if type(k)=="string" and k:match("^[%a_][%w_]*$") then
+                    key = k
+                else
+                    key = "["..serialize(k, nextIndent).."]"
+                end
+                parts[#parts+1] = string.format("%s%s = %s", nextIndent, key, serialize(v, nextIndent))
+            end
+            if #parts==0 then return "{}" end
+            return "{\n"..table.concat(parts, ",\n").."\n"..indent.."}"
+        else
+            return string.format("%q", tostring(val))
+        end
     end
 
     local function read_lua_table(path)
         if not isfile(path) then return {} end
-        local src = readfile(path)
-        local f, err = loadstring(src)
-        if not f then warn("[SaveManager] parse autosave.lua failed:", err) return {} end
-        local ok, res = pcall(f)
-        if not ok or type(res) ~= "table" then return {} end
+        local ok, src = pcall(readfile, path); if not ok then return {} end
+        local fn, e = loadstring(src); if not fn then warn("[SaveManager] parse autosave.lua failed:", e) return {} end
+        local ok2, res = pcall(fn); if not ok2 or type(res)~="table" then return {} end
         return res
     end
 
     local function write_lua_table(path, tbl)
-    local function serialize(t, indent)
-        indent = indent or ""
-        local str = "{\n"
-        local nextIndent = indent .. "  "
-        for k, v in pairs(t) do
-            local key = ("[%q]"):format(tostring(k))
-            local value
-            if type(v) == "table" then
-                value = serialize(v, nextIndent)
-            elseif type(v) == "string" then
-                value = ("%q"):format(v)
-            else
-                value = tostring(v)
-            end
-            str = str .. nextIndent .. key .. " = " .. value .. ",\n"
-        end
-        return str .. indent .. "}"
+        local ok, err = pcall(writefile, path, "return "..serialize(tbl).."\n")
+        if not ok then warn("[SaveManager] write autosave.lua failed:", err) end
     end
 
-    local content = "return " .. serialize(tbl)
-    local ok, err = pcall(writefile, path, content)
-    if not ok then warn("[SaveManager] write autosave.lua failed:", err) end
-end
+    local function isBlocked(self) return (self._suppressSave==true) or ((self._ifaceBlock or 0)>0) end
+    local function hasAny(tbl) for _ in pairs(tbl or {}) do return true end return false end
 
-    ---------------------------------------------------------------------
-    -- 🚫 Interface block
-    function SaveManager:_IfaceBlockOn()
-        self._ifaceBlock = (self._ifaceBlock or 0) + 1
-    end
-    function SaveManager:_IfaceBlockOff()
-        self._ifaceBlock = math.max(0, (self._ifaceBlock or 0) - 1)
-    end
-    local function _isBlocked(self)
-        return (self._suppressSave == true) or ((self._ifaceBlock or 0) > 0)
-    end
+    -- ===== iface block =====
+    function SaveManager:_IfaceBlockOn()  self._ifaceBlock = (self._ifaceBlock or 0) + 1 end
+    function SaveManager:_IfaceBlockOff() self._ifaceBlock = math.max(0, (self._ifaceBlock or 0) - 1) end
 
-    ---------------------------------------------------------------------
-    -- 🔧 Helpers
-    local function getOptionValue(opt)
-        if typeof(opt) ~= "table" then return nil end
-        return rawget(opt, "Value")
+    -- ===== public compat =====
+    function SaveManager:SetIgnoreIndexes(list)
+        self.Ignore = self.Ignore or {}
+        for _,k in ipairs(list or {}) do self.Ignore[k] = true end
     end
-
-    local function setOptionValue(opt, val)
-        if typeof(opt) ~= "table" then return end
-        if typeof(opt.SetValue) == "function" then
-            pcall(function() opt:SetValue(val) end)
-        else
-            opt.Value = val
-        end
-    end
-
-    local function readAutosave()
-        ensureFolder(SaveManager.Folder)
+    function SaveManager:SetFolder(folder)
+        self.Folder = folder or self.Folder
+        ensureFolder(self.Folder)
+        ensureFolder(self.Folder.."/settings")
         ensureFile(autosavePath())
+    end
+    function SaveManager:SetLibrary(lib)
+        self.Library = lib
+        -- Một số Fluent dùng Flags, số khác dùng Options
+        self.Options = (lib and (lib.Flags or lib.Options)) or {}
+    end
+
+    -- ===== helpers value =====
+    local function getVal(opt)
+        if typeof(opt)~="table" then return nil end
+        return rawget(opt,"Value")
+    end
+    local function setVal(opt, v)
+        if typeof(opt)~="table" then return end
+        if typeof(opt.SetValue)=="function" then pcall(function() opt:SetValue(v) end)
+        else opt.Value = v end
+    end
+
+    -- ===== core io =====
+    function SaveManager:_readAll()
+        ensureFolder(self.Folder); ensureFile(autosavePath())
         return read_lua_table(autosavePath())
     end
-
-    local function writeAutosave(tbl)
-        ensureFolder(SaveManager.Folder)
-        ensureFile(autosavePath())
+    function SaveManager:_writeAll(tbl)
+        ensureFolder(self.Folder); ensureFile(autosavePath())
         write_lua_table(autosavePath(), tbl)
+        dbg("autosave wrote", autosavePath())
+    end
+    function SaveManager:_writeKey(k, v)
+        if isBlocked(self) then return end
+        if self.Ignore and self.Ignore[k] then return end
+        local t = self:_readAll(); t[k]=v; self:_writeAll(t)
     end
 
-    ---------------------------------------------------------------------
-    -- 💾 Core write
-    function SaveManager:_WriteAutosaveKey(key, value)
-        if _isBlocked(self) then return end
-        local tbl = readAutosave()
-        tbl[key] = value
-        writeAutosave(tbl)
+    function SaveManager:_applyAllToOptions()
+        local t = self:_readAll()
+        local opts = self.Options or {}
+        for k,v in pairs(t) do
+            if not (self.Ignore and self.Ignore[k]) then
+                local o = opts[k]; if o then pcall(setVal, o, v) end
+            end
+        end
     end
 
-    function SaveManager:_SaveCurrentOptionsToAutosave()
-        if _isBlocked(self) then return end
+    function SaveManager:_snapshotAll()
+        if isBlocked(self) then return end
+        -- ⚠️ KHÔNG snapshot nếu chưa có option nào, tránh ghi {} đè file
+        if not hasAny(self.Options) then dbg("skip snapshot (no options yet)"); return end
         local data = {}
-        for key, opt in pairs(self.Options or {}) do
-            data[key] = getOptionValue(opt)
+        for k,o in pairs(self.Options) do
+            if not (self.Ignore and self.Ignore[k]) then data[k]=getVal(o) end
         end
-        writeAutosave(data)
+        self:_writeAll(data)
     end
 
-    function SaveManager:_ApplyAutosaveToCurrentOptions()
-        local tbl = readAutosave()
-        for key, val in pairs(tbl) do
-            local opt = self.Options[key]
-            if opt then pcall(setOptionValue, opt, val) end
-        end
-    end
-
-    ---------------------------------------------------------------------
-    -- 🧠 Hooks
+    -- ===== hooks (delta-write per key) =====
     function SaveManager:_HookAutosave()
         task.spawn(function()
-            while task.wait(0.25) do
-                if not self.Library or type(self.Library.Flags) ~= "table" then continue end
-                for key, opt in pairs(self.Library.Flags) do
-                    if typeof(opt.OnChanged) == "function" and not opt._hooked then
-                        opt._hooked = true
+            while task.wait(0.2) do
+                local flags = self.Library and (self.Library.Flags or self.Library.Options)
+                if type(flags)~="table" then continue end
+                for key, opt in pairs(flags) do
+                    if self.Ignore and self.Ignore[key] then continue end
+                    if typeof(opt)=="table" and typeof(opt.OnChanged)=="function" and not opt.__as_hooked then
+                        opt.__as_hooked = true
                         local old = opt.OnChanged
                         opt.OnChanged = function(...)
                             local ok, err = pcall(old, ...)
-                            if not ok then warn("[SaveManager] OnChanged err:", err) end
-                            if _isBlocked(SaveManager) then return end
-                            task.defer(function()
-                                SaveManager:_WriteAutosaveKey(key, getOptionValue(opt))
-                            end)
+                            if not ok then warn("[SaveManager] OnChanged:", err) end
+                            if isBlocked(SaveManager) then return end
+                            task.defer(function() SaveManager:_writeKey(key, getVal(opt)) end)
                         end
                     end
                 end
@@ -154,23 +155,15 @@ end
         end)
     end
 
-    ---------------------------------------------------------------------
-    -- 🧩 Public API
-    function SaveManager:SetFolder(folder)
-        self.Folder = folder
-        ensureFolder(self.Folder)
-        ensureFile(autosavePath())
-    end
-
-    function SaveManager:SetLibrary(lib)
-        self.Library = lib
-        self.Options = lib and lib.Flags or {}
-    end
-
+    -- ===== lifecycle =====
     function SaveManager:LoadWithPriority()
-        self:_ApplyAutosaveToCurrentOptions()
+        -- 1) KHÔI PHỤC từ file (nếu có)
+        self:_applyAllToOptions()
+        -- 2) GẮN HOOK delta
         self:_HookAutosave()
-        self:_SaveCurrentOptionsToAutosave()
+        -- 3) KHÔNG snapshot lập tức (tránh ghi {} đè file khi GUI chưa build xong)
+        --    → chỉ khi user thay đổi, delta-write mới ghi.
+        -- Nếu muốn ép ghi sau khi GUI build xong, tự gọi SaveManager:_snapshotAll() **khi đã có options**.
     end
 end
 

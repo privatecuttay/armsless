@@ -78,30 +78,6 @@ local InterfaceManager = {} do
 
         InterfaceTheme:SetValue(Settings.Theme)
 	
-		if Library.UseAcrylic then
-			section:AddToggle("AcrylicToggle", {
-				Title = "Acrylic",
-				Description = "The blurred background requires graphic quality 8+",
-				Default = Settings.Acrylic,
-				Callback = function(Value)
-					Library:ToggleAcrylic(Value)
-                    Settings.Acrylic = Value
-                    InterfaceManager:SaveSettings()
-				end
-			})
-		end
-	
-		section:AddToggle("TransparentToggle", {
-			Title = "Transparency",
-			Description = "Makes the interface transparent.",
-			Default = Settings.Transparency,
-			Callback = function(Value)
-				Library:ToggleTransparency(Value)
-				Settings.Transparency = Value
-                InterfaceManager:SaveSettings()
-			end
-		})
-	
 		local MenuKeybind = section:AddKeybind("MenuKeybind", { Title = "Minimize Bind", Default = Settings.MenuKeybind })
 		MenuKeybind:OnChanged(function()
 			Settings.MenuKeybind = MenuKeybind.Value
@@ -109,9 +85,6 @@ local InterfaceManager = {} do
 		end)
 		Library.MinimizeKeybind = MenuKeybind
 
-        ----------------------------------------------------------------
-        -- 🟦 TỰ ĐỘNG THÊM NÚT CẤU HÌNH SLIME Ở GÓC PHẢI DƯỚI
-        ----------------------------------------------------------------
         local VIM = game:GetService("VirtualInputManager")
         local UIS = game:GetService("UserInputService")
         local TweenService = game:GetService("TweenService")
@@ -144,7 +117,6 @@ local InterfaceManager = {} do
         stroke.Thickness = 1
         stroke.Color = Color3.fromRGB(200, 150, 180)
 
-        -- Kéo mượt
         local dragging, dragStart, startPos
         btn.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -168,7 +140,6 @@ local InterfaceManager = {} do
             end
         end)
 
-        -- Hiệu ứng slime
         local function slimeEffect()
             local tweenIn = TweenService:Create(btn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 Size = UDim2.fromOffset(44, 44)
@@ -181,7 +152,6 @@ local InterfaceManager = {} do
             tweenOut:Play()
         end
 
-        -- Đồng bộ keybind với Fluent
         btn.MouseButton1Click:Connect(function()
             slimeEffect()
             local key = Enum.KeyCode[Settings.MenuKeybind] or Enum.KeyCode.LeftControl

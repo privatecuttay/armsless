@@ -21,7 +21,34 @@ local GUI = New("ScreenGui", {
 })
 ProtectGui(GUI)
 NotificationModule:Init(GUI)
+task.spawn(function()
+    local function _resetAll()
+        local bags = {}
+        if typeof(Library) == "table" and typeof(Library.Flags) == "table" then
+            table.insert(bags, Library.Flags)
+        end
+        if typeof(Library) == "table" and typeof(Library.Options) == "table" then
+            table.insert(bags, Library.Options)
+        end
+        for _, bag in ipairs(bags) do
+            for _, flag in pairs(bag) do
+                if typeof(flag) == "table" and (flag.Type == "Toggle" or flag.Type == "toggle")
+                   and typeof(flag.SetValue) == "function" then
+                    pcall(function() flag:SetValue(false) end)
+                end
+            end
+        end
+    end
 
+    if GUI and GUI.Destroying then
+        GUI.Destroying:Connect(_resetAll)
+    end
+    if GUI then
+        GUI.AncestryChanged:Connect(function(_, parent)
+            if parent == nil then _resetAll() end
+        end)
+    end
+end)
 local Library = {
 	Version = "1.1.0",
 

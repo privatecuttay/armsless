@@ -1,18 +1,19 @@
--- SaveManager.lua  (autosave.lua; lưu theo hành động Toggle/Dropdown/Input/Slider)
+-- SaveManager.lua (tự động lưu vào autosave.lua, an toàn khi GUI bị xóa)
 local HttpService = game:GetService("HttpService")
 
 local SaveManager = {} do
     SaveManager.Folder       = "FluentScriptHub/specific-game"
-    SaveManager.FileName     = "autosave.lua"      -- 🔄 dùng .lua thay vì .json
-    SaveManager.SettingsFile = "options.json"      -- giữ nguyên cho phần Settings phụ
+    SaveManager.FileName     = "autosave.lua"
+    SaveManager.SettingsFile = "options.json"
 
     SaveManager.Library = nil
     SaveManager.Options = {}
     SaveManager.Settings = {}
     SaveManager.IgnoreIndexes = {}
-    SaveManager._suppressSave = false   -- ⚠️ InterfaceManager sẽ bật cờ này khi reset toggle lúc GUI bị xoá
+    SaveManager._suppressSave = false
+    SaveManager._debug = false
 
-    -- ================= helpers: FS =================
+    -- ========= File helper =========
     local function ensureFolders(self)
         local base = self.Folder
         local paths = { base, base .. "/settings" }
@@ -24,10 +25,15 @@ local SaveManager = {} do
         end
     end
 
-    local function optionsPath(self)  return self.Folder .. "/" .. self.FileName end
-    local function settingsPath(self) return self.Folder .. "/settings/" .. self.SettingsFile end
+    function SaveManager:GetAutosavePath()
+        return self.Folder .. "/" .. self.FileName
+    end
 
-    -- ================= helpers: Lua serialize/deserialize =================
+    local function dbg(self, ...)
+        if self._debug then print("[SaveManager]", ...) end
+    end
+
+    -- ========= Lua serialize =========
     local function escape_str(s)
         return string.format("%q", tostring(s))
     end
@@ -39,7 +45,6 @@ local SaveManager = {} do
             if type(k) ~= "number" then return false end
             if k > i then i = k end
         end
-        -- mảng “chuẩn” nếu đầy đủ 1..n
         for idx = 1, i do
             if tbl[idx] == nil then return false end
         end
@@ -78,7 +83,6 @@ local SaveManager = {} do
                 return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
             end
         else
-            -- các kiểu không lưu được → stringify
             return escape_str(tostring(v))
         end
     end
@@ -103,11 +107,10 @@ local SaveManager = {} do
         return result
     end
 
-    -- ================= helpers: Flags =================
+    -- ========= Flag helper =========
     local function isSavableFlag(flag)
         if typeof(flag) ~= "table" then return false end
         local t = string.lower(tostring(flag.Type or ""))
-        -- chỉ lưu: toggle / dropdown / multidropdown / input / slider
         return (t=="toggle" or t=="dropdown" or t=="multidropdown" or t=="input" or t=="slider")
     end
 
@@ -127,29 +130,18 @@ local SaveManager = {} do
         return false
     end
 
-    -- ================= PUBLIC API =================
+    -- ========= Public API =========
     function SaveManager:SetFolder(folder)
         self.Folder = tostring(folder or self.Folder)
         ensureFolders(self)
-
-        -- 🔹 Khởi tạo file rỗng autosave.lua nếu chưa có
-        local op = optionsPath(self)
-        if not isfile(op) then
-            write_lua_table(op, {})  -- tạo "return {}"
-        end
-
-        -- 🔹 Khởi tạo settings file (vẫn JSON) nếu chưa có
-        local sp = settingsPath(self)
-        if not isfile(sp) then
-            local ok, err = pcall(writefile, sp, "{}")
-            if not ok then warn("[SaveManager] init settings file failed:", err) end
-        end
+        local path = self:GetAutosavePath()
+        if not isfile(path) then write_lua_table(path, {}) end
     end
 
     function SaveManager:SetLibrary(lib) self.Library = lib end
     function SaveManager:SetIgnoreIndexes(t) self.IgnoreIndexes = t or {} end
 
-    -- Tự hook thay đổi để LƯU NGAY mỗi hành động bật tắt / chọn / nhập
+    -- ========= Hook all flags (autosave) =========
     local hooked = {}
     function SaveManager:_HookAllOptions()
         task.spawn(function()
@@ -161,47 +153,59 @@ local SaveManager = {} do
                     if isSavableFlag(flag) and not hooked[flag] then
                         hooked[flag] = true
 
+                        -- áp giá trị đã lưu ngay khi phát hiện
+                        local saved = self.Options and self.Options[key]
+                        if saved ~= nil then
+                            self._suppressSave = true
+                            pcall(setFlagValue, flag, saved)
+                            task.defer(function() self._suppressSave = false end)
+                        end
+
                         local function saveNow()
-                            -- ❗ BỎ QUA lưu khi GUI bị xoá (InterfaceManager set _suppressSave=true trước khi reset toggle)
                             if self._suppressSave then return end
                             self.Options[key] = getFlagValue(flag)
                             self:Save()
                         end
 
+                        -- Gắn event nếu có
                         if typeof(flag.OnChanged) == "function" then
-                            -- bọc OnChanged để lưu ngay “hành động”
-                            local old = flag.OnChanged
-                            flag.OnChanged = function(...)
-                                local ok, err = pcall(old, ...)
-                                if not ok then warn("[SaveManager] OnChanged error:", err) end
-                                saveNow()
-                            end
-                        else
-                            -- Fallback: dò thay đổi theo thời gian
-                            task.spawn(function()
-                                local function safeDump(v)
-                                    -- dùng JSON chỉ để so sánh sâu nhanh gọn
-                                    local ok, s = pcall(HttpService.JSONEncode, HttpService, v)
-                                    return ok and s or tostring(v)
-                                end
-                                local last = safeDump(getFlagValue(flag))
-                                while hooked[flag] do
-                                    task.wait(0.5)
-                                    local cur = safeDump(getFlagValue(flag))
-                                    if cur ~= last and not self._suppressSave then
-                                        last = cur
-                                        self.Options[key] = getFlagValue(flag)
-                                        self:Save()
-                                    end
-                                end
+                            local ok, _ = pcall(function()
+                                return flag:OnChanged(function(...) saveNow() end)
                             end)
+                            if not ok then
+                                local old = flag.OnChanged
+                                flag.OnChanged = function(...)
+                                    local ok2, err = pcall(old, ...)
+                                    if not ok2 then warn("[SaveManager] OnChanged error:", err) end
+                                    saveNow()
+                                end
+                            end
                         end
+
+                        -- Fallback polling
+                        task.spawn(function()
+                            local function dump(v)
+                                local ok, s = pcall(HttpService.JSONEncode, HttpService, v)
+                                return ok and s or tostring(v)
+                            end
+                            local last = dump(getFlagValue(flag))
+                            while hooked[flag] do
+                                task.wait(0.5)
+                                local cur = dump(getFlagValue(flag))
+                                if cur ~= last and not self._suppressSave then
+                                    last = cur
+                                    self.Options[key] = getFlagValue(flag)
+                                    self:Save()
+                                end
+                            end
+                        end)
                     end
                 end
             end
         end)
     end
 
+    -- ========= Save / Load =========
     function SaveManager:Save()
         if self._suppressSave then return end
         ensureFolders(self)
@@ -218,21 +222,19 @@ local SaveManager = {} do
         end
 
         self.Options = data
-        write_lua_table(optionsPath(self), data)  -- 🔄 ghi ra autosave.lua
+        write_lua_table(self:GetAutosavePath(), data)
+        dbg(self, "Saved to", self:GetAutosavePath())
     end
 
     function SaveManager:Load()
         ensureFolders(self)
-        local p = optionsPath(self)
-        if not isfile(p) then
-            write_lua_table(p, {})  -- tạo "return {}" nếu thiếu
-            return
-        end
+        local path = self:GetAutosavePath()
+        if not isfile(path) then write_lua_table(path, {}) return end
 
-        local decoded = read_lua_table(p)
+        local decoded = read_lua_table(path)
         if type(decoded) ~= "table" then return end
 
-        self._suppressSave = true   -- tránh ghi vòng khi set lại flag
+        self._suppressSave = true
         self.Options = decoded
 
         local flags = self.Library and self.Library.Flags
@@ -244,24 +246,23 @@ local SaveManager = {} do
                 end
             end
         end
-
         task.defer(function() self._suppressSave = false end)
     end
 
-    -- ===== Settings phụ (giữ JSON) =====
+    -- ========= Settings JSON phụ =========
     function SaveManager:SaveSettings()
         if self._suppressSave then return end
         ensureFolders(self)
-        local ok, err = pcall(writefile, settingsPath(self), HttpService:JSONEncode(self.Settings))
+        local ok, err = pcall(writefile, self.Folder .. "/settings/" .. self.SettingsFile, HttpService:JSONEncode(self.Settings))
         if not ok then warn("[SaveManager] write settings failed:", err) end
     end
 
     function SaveManager:LoadSettings()
         ensureFolders(self)
-        local p = settingsPath(self)
+        local p = self.Folder .. "/settings/" .. self.SettingsFile
         if not isfile(p) then
-            local okw, errw = pcall(writefile, p, "{}")
-            if not okw then warn("[SaveManager] create settings file failed:", errw) end
+            local ok, err = pcall(writefile, p, "{}")
+            if not ok then warn("[SaveManager] create settings file failed:", err) end
             return
         end
         local ok, content = pcall(readfile, p)
@@ -270,11 +271,11 @@ local SaveManager = {} do
         if ok2 and type(decoded)=="table" then self.Settings = decoded end
     end
 
+    -- ========= Load + Hook =========
     function SaveManager:LoadWithPriority()
         self:LoadSettings()
         self:Load()
         self:_HookAllOptions()
-        -- Ép ghi 1 lần để đảm bảo autosave.lua tồn tại sẵn từ đầu
         if not self._suppressSave then self:Save() end
     end
 

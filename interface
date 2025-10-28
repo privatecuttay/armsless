@@ -9,13 +9,82 @@ local InterfaceManager = {} do
         MenuKeybind = "LeftControl"
     }
 
+    -- ===== auto-nil toggles & saves =====
+    local function _nilAllToggles(Library)
+        if not Library then return end
+
+        -- 1) Set all toggles to false, then nil out flags/options
+        local bags = {}
+        if typeof(Library.Flags) == "table" then table.insert(bags, Library.Flags) end
+        if typeof(Library.Options) == "table" then table.insert(bags, Library.Options) end
+
+        for _, bag in ipairs(bags) do
+            for k, flag in pairs(bag) do
+                if typeof(flag) == "table" and (flag.Type == "Toggle" or flag.Type == "toggle") then
+                    pcall(function()
+                        if typeof(flag.SetValue) == "function" then flag:SetValue(false) end
+                    end)
+                end
+                bag[k] = nil
+            end
+        end
+
+        -- 2) Wipe SaveManager (if exists) + known files
+        local SM = rawget(getgenv(), "SaveManager")
+        if type(SM) == "table" then
+            if type(SM.Options) == "table" then for k in pairs(SM.Options) do SM.Options[k] = nil end end
+            if type(SM.Settings) == "table" then for k in pairs(SM.Settings) do SM.Settings[k] = nil end end
+
+            local folder = rawget(SM, "Folder") or "FluentScriptHub/specific-game"
+            local paths = {
+                folder .. "/autosave.json",
+                folder .. "/options.json",
+                folder .. "/settings/options.json",
+                folder .. "/settings/autoload.json",
+            }
+            for _, p in ipairs(paths) do
+                pcall(function()
+                    if isfile(p) then writefile(p, "{}") end
+                end)
+            end
+
+            pcall(function() if typeof(SM.Save) == "function" then SM:Save() end end)
+            pcall(function() if typeof(SM.SaveSettings) == "function" then SM:SaveSettings() end end)
+        end
+    end
+
+    local function _attachAutoNil(Library)
+        if not Library then return end
+        local gui = Library.GUI
+        if not gui then return end
+        if Library.___AutoNilAttached then return end
+        Library.___AutoNilAttached = true
+
+        if gui.Destroying then
+            gui.Destroying:Connect(function()
+                _nilAllToggles(Library)
+            end)
+        end
+        gui.AncestryChanged:Connect(function(_, parent)
+            if parent == nil then
+                _nilAllToggles(Library)
+            end
+        end)
+    end
+    -- ====================================
+
     function InterfaceManager:SetFolder(folder)
 		self.Folder = folder;
 		self:BuildFolderTree()
 	end
 
     function InterfaceManager:SetLibrary(library)
+        -- if switching to a new Library (execute again), nil the old one first
+        if self.Library and self.Library ~= library then
+            _nilAllToggles(self.Library)
+        end
 		self.Library = library
+        _attachAutoNil(library)
 	end
 
     function InterfaceManager:BuildFolderTree()
@@ -75,9 +144,8 @@ local InterfaceManager = {} do
                 InterfaceManager:SaveSettings()
 			end
 		})
-
         InterfaceTheme:SetValue(Settings.Theme)
-	
+
 		local MenuKeybind = section:AddKeybind("MenuKeybind", { Title = "Minimize Bind", Default = Settings.MenuKeybind })
 		MenuKeybind:OnChanged(function()
 			Settings.MenuKeybind = MenuKeybind.Value
@@ -94,7 +162,7 @@ local InterfaceManager = {} do
             return (ok and typeof(ui) == "Instance" and ui) or game:GetService("CoreGui")
         end
 		local parent = uiRoot()
-	
+
 		local old = parent:FindFirstChild("Meo_Button")
 		if old then
 	    	old:Destroy()
@@ -105,7 +173,7 @@ local InterfaceManager = {} do
         gui.IgnoreGuiInset = true
         gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
         gui.ResetOnSpawn = false
-        gui.Parent = uiRoot()
+        gui.Parent = parent
 
         local btn = Instance.new("ImageButton")
         btn.Name = "Buttonn"

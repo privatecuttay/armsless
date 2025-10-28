@@ -1,3 +1,4 @@
+-- InterfaceManager.lua
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -9,47 +10,37 @@ local InterfaceManager = {} do
         MenuKeybind = "LeftControl"
     }
 
-    -- ===== helpers: nil all toggles & wipe saves =====
-    local function _nilAllToggles(Library)
+    -- ===== reset all toggles to false, but DO NOT write save files =====
+    local function _resetAllToggles_NoSave(Library)
         if not Library then return end
+
+        local SM = rawget(getgenv(), "SaveManager")
+        if SM and type(SM)=="table" then SM._suppressSave = true end
 
         local bags = {}
         if typeof(Library.Flags) == "table" then table.insert(bags, Library.Flags) end
         if typeof(Library.Options) == "table" then table.insert(bags, Library.Options) end
 
         for _, bag in ipairs(bags) do
-            for k, flag in pairs(bag) do
+            for _, flag in pairs(bag) do
                 if typeof(flag) == "table" and (flag.Type == "Toggle" or flag.Type == "toggle") then
                     pcall(function()
-                        if typeof(flag.SetValue) == "function" then flag:SetValue(false) end
+                        if typeof(flag.SetValue) == "function" then
+                            flag:SetValue(false)
+                        elseif rawget(flag, "Value") ~= nil then
+                            flag.Value = false
+                        end
                     end)
                 end
-                bag[k] = nil
             end
         end
 
-        local SM = rawget(getgenv(), "SaveManager")
-        if type(SM) == "table" then
-            if type(SM.Options) == "table" then for k in pairs(SM.Options) do SM.Options[k] = nil end end
-            if type(SM.Settings) == "table" then for k in pairs(SM.Settings) do SM.Settings[k] = nil end end
-
-            local folder = rawget(SM, "Folder") or "FluentScriptHub/specific-game"
-            local paths = {
-                folder .. "/autosave.json",
-                folder .. "/options.json",
-                folder .. "/settings/options.json",
-                folder .. "/settings/autoload.json",
-            }
-            for _, p in ipairs(paths) do
-                pcall(function() if isfile(p) then writefile(p, "{}") end end)
-            end
-
-            pcall(function() if typeof(SM.Save) == "function" then SM:Save() end end)
-            pcall(function() if typeof(SM.SaveSettings) == "function" then SM:SaveSettings() end end)
-        end
+        task.defer(function()
+            local SM2 = rawget(getgenv(), "SaveManager")
+            if SM2 and type(SM2)=="table" then SM2._suppressSave = false end
+        end)
     end
 
-    -- destroy old Fluent GUIs: attribute/signature based
     local function _destroyOldGuis(excluding)
         local CoreGui = game:GetService("CoreGui")
         local roots = { CoreGui }
@@ -74,20 +65,20 @@ local InterfaceManager = {} do
         end
     end
 
-    local function _attachAutoNil(Library)
+    local function _attachAutoReset(Library)
         if not Library then return end
         local gui = Library.GUI
         if not gui then return end
-        if Library.___AutoNilAttached then return end
-        Library.___AutoNilAttached = true
+        if Library.___AutoResetAttached then return end
+        Library.___AutoResetAttached = true
 
         pcall(function() gui:SetAttribute("Fluent", true) end)
 
         if gui.Destroying then
-            gui.Destroying:Connect(function() _nilAllToggles(Library) end)
+            gui.Destroying:Connect(function() _resetAllToggles_NoSave(Library) end)
         end
         gui.AncestryChanged:Connect(function(_, parent)
-            if parent == nil then _nilAllToggles(Library) end
+            if parent == nil then _resetAllToggles_NoSave(Library) end
         end)
     end
     -- ====================================
@@ -106,13 +97,13 @@ local InterfaceManager = {} do
                     self.Library.GUI:Destroy()
                 end
             end)
-            _nilAllToggles(self.Library)
+            _resetAllToggles_NoSave(self.Library)
         end
 
         _destroyOldGuis(library and library.GUI)
 
 		self.Library = library
-        _attachAutoNil(library)
+        _attachAutoReset(library)
 	end
 
     function InterfaceManager:BuildFolderTree()
@@ -176,85 +167,6 @@ local InterfaceManager = {} do
             InterfaceManager:SaveSettings()
 		end)
 		Library.MinimizeKeybind = MenuKeybind
-
-        local VIM = game:GetService("VirtualInputManager")
-        local UIS = game:GetService("UserInputService")
-        local TweenService = game:GetService("TweenService")
-
-        local function uiRoot()
-            local ok, ui = pcall(function() return gethui and gethui() end)
-            return (ok and typeof(ui) == "Instance" and ui) or game:GetService("CoreGui")
-        end
-		local parent = uiRoot()
-
-		local old = parent:FindFirstChild("Meo_Button")
-		if old then pcall(function() old:Destroy() end) end
-
-        local gui = Instance.new("ScreenGui")
-        gui.Name = "Meo_Button"
-        gui.IgnoreGuiInset = true
-        gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-        gui.ResetOnSpawn = false
-        gui.Parent = parent
-
-        local btn = Instance.new("ImageButton")
-        btn.Name = "Buttonn"
-        btn.Size = UDim2.fromOffset(50, 50)
-        btn.AnchorPoint = Vector2.new(1, 1)
-        btn.Position = UDim2.new(1, -5, 1, -5)
-        btn.BackgroundColor3 = Color3.fromRGB(44, 44, 44)
-        btn.Image = "rbxassetid://138537648998329"
-        btn.ScaleType = Enum.ScaleType.Fit
-        btn.AutoButtonColor = true
-        btn.Parent = gui
-
-        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
-        local stroke = Instance.new("UIStroke", btn)
-        stroke.Thickness = 1
-        stroke.Color = Color3.fromRGB(200, 150, 180)
-
-        local dragging, dragStart, startPos
-        btn.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-                dragStart = input.Position
-                startPos = btn.Position
-            end
-        end)
-        UIS.InputChanged:Connect(function(input)
-            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                local delta = input.Position - dragStart
-                btn.Position = UDim2.new(
-                    startPos.X.Scale, startPos.X.Offset + delta.X,
-                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
-                )
-            end
-        end)
-        UIS.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = false
-            end
-        end)
-
-        local function slimeEffect()
-            local tweenIn = TweenService:Create(btn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Size = UDim2.fromOffset(44, 44)
-            })
-            local tweenOut = TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                Size = UDim2.fromOffset(50, 50)
-            })
-            tweenIn:Play()
-            tweenIn.Completed:Wait()
-            tweenOut:Play()
-        end
-
-        btn.MouseButton1Click:Connect(function()
-            slimeEffect()
-            local key = Enum.KeyCode[Settings.MenuKeybind] or Enum.KeyCode.LeftControl
-            VIM:SendKeyEvent(true, key, false, game)
-            task.wait(0.05)
-            VIM:SendKeyEvent(false, key, false, game)
-        end)
     end
 end
 

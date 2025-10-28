@@ -1,4 +1,4 @@
--- InterfaceManager.lua ew
+-- InterfaceManager.lua aaaa
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -40,7 +40,7 @@ local InterfaceManager = {} do
         end)
     end
 
-    -- 🔎 Tìm Fluent GUI đang tồn tại (không đụng SettingsHub)
+    -- 🔎 Tìm Fluent GUI đang tồn tại (không đụng Roblox Settings)
     local function _findExistingFluentGui()
         local CoreGui = game:GetService("CoreGui")
         local roots = { CoreGui }
@@ -64,7 +64,7 @@ local InterfaceManager = {} do
         return nil
     end
 
-    -- ========= Meo Button helpers (chống trùng ở CoreGui & gethui) =========
+    -- ========= Meo Button helpers (chống trùng ở CoreGui & gethui, bám đời Fluent GUI) =========
     local function _getUiRoots()
         local roots = { game:GetService("CoreGui") }
         local ok, ui = pcall(function() return gethui and gethui() end)
@@ -88,8 +88,19 @@ local InterfaceManager = {} do
         return game:GetService("CoreGui")
     end
 
-    local function _ensureMeoButton(Settings)
-        if _findMeoButton() then return end -- đã có, không tạo trùng
+    -- anchorGui: ScreenGui Fluent cần bám đời; khi anchorGui bị xóa → Meo_Button tự xóa
+    local function _ensureMeoButton(Settings, anchorGui)
+        local existed = _findMeoButton()
+        if existed then
+            -- Nếu đã tồn tại nhưng đang bám sai anchor, phá để tạo lại
+            local anchorObj = existed:FindFirstChild("Anchor") :: ObjectValue
+            if anchorGui and (not anchorObj or anchorObj.Value ~= anchorGui) then
+                pcall(function() existed:Destroy() end)
+                existed = nil
+            else
+                return -- đã có và đúng anchor → thôi
+            end
+        end
 
         local VIM = game:GetService("VirtualInputManager")
         local UIS = game:GetService("UserInputService")
@@ -103,6 +114,12 @@ local InterfaceManager = {} do
         gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
         gui.ResetOnSpawn = false
         gui.Parent = parent
+
+        -- Lưu anchor dưới dạng ObjectValue để nhận diện lần sau
+        local anchorVal = Instance.new("ObjectValue")
+        anchorVal.Name = "Anchor"
+        anchorVal.Value = anchorGui
+        anchorVal.Parent = gui
 
         local btn = Instance.new("ImageButton")
         btn.Name = "CtrlSquare"
@@ -172,9 +189,21 @@ local InterfaceManager = {} do
             task.wait(0.05)
             VIM:SendKeyEvent(false, key, false, game)
         end)
+
+        -- ✅ Ràng đời: khi Fluent GUI bị xóa → Meo_Button cũng xóa theo
+        if anchorGui and anchorGui:IsA("Instance") then
+            anchorGui.Destroying:Connect(function()
+                if gui and gui.Parent then pcall(function() gui:Destroy() end) end
+            end)
+            anchorGui.AncestryChanged:Connect(function(_, parent)
+                if parent == nil then
+                    if gui and gui.Parent then pcall(function() gui:Destroy() end) end
+                end
+            end)
+        end
     end
 
-    -- 🔗 Gắn auto-reset khi GUI bị xóa
+    -- 🔗 Auto-reset khi GUI Fluent bị xóa
     local function _attachAutoReset(Library)
         if not Library then return end
         local gui = Library.GUI
@@ -201,7 +230,7 @@ local InterfaceManager = {} do
     function InterfaceManager:SetLibrary(library)
         local Settings = InterfaceManager.Settings
 
-        -- ❗ Không tạo trùng Fluent GUI: nếu đã có GUI thì liên kết vào nó
+        -- ❗ Không tạo trùng GUI Fluent: nếu đã có GUI thì bind vào nó
         local existingGui = _findExistingFluentGui()
         if existingGui then
             local running = rawget(getgenv(), "Fluent")
@@ -209,12 +238,10 @@ local InterfaceManager = {} do
                 self.Library = running
                 _attachAutoReset(running)
             else
-                -- shim tối thiểu để BuildInterfaceSection không lỗi khi không có object Library đầy đủ
                 self.Library = self.Library or { GUI = existingGui, Themes = { "Dark","Light" }, SetTheme = function() end }
                 _attachAutoReset(self.Library)
             end
 
-            -- nếu truyền vào library mới khác GUI đang có → phá hủy để tránh trùng
             if library and library.GUI and library.GUI ~= existingGui then
                 print("⚠️ GUI Fluent đã có sẵn, không tạo thêm.")
                 pcall(function()
@@ -226,8 +253,8 @@ local InterfaceManager = {} do
                 end)
             end
 
-            -- đảm bảo luôn có Meo Button dù reattach
-            _ensureMeoButton(Settings)
+            -- 🔗 Meo Button bám đời existing GUI
+            _ensureMeoButton(Settings, existingGui)
             return
         end
 
@@ -245,7 +272,9 @@ local InterfaceManager = {} do
 
         self.Library = library
         _attachAutoReset(library)
-        _ensureMeoButton(Settings)
+        -- 🔗 Meo Button bám đời GUI mới
+        local anchor = library and library.GUI or nil
+        _ensureMeoButton(Settings, anchor)
 	end
 
     function InterfaceManager:BuildFolderTree()
@@ -281,10 +310,7 @@ local InterfaceManager = {} do
 
     -- ========= UI Section =========
     function InterfaceManager:BuildInterfaceSection(tab)
-        if not self or not self.Library then
-            -- không còn nil nữa trong flow bình thường, nhưng giữ guard cho chắc
-            return
-        end
+        if not self or not self.Library then return end
 
 		local Library = self.Library
         local Settings = InterfaceManager.Settings
@@ -321,9 +347,6 @@ local InterfaceManager = {} do
             InterfaceManager:SaveSettings()
 		end)
 		Library.MinimizeKeybind = MenuKeybind
-
-        -- vẫn an toàn nếu gọi lại
-        _ensureMeoButton(Settings)
     end
 end
 

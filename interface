@@ -203,23 +203,27 @@ local InterfaceManager = {} do
         end
     end
 
-    -- 🔗 Auto-reset khi GUI Fluent bị xóa
-    local function _attachAutoReset(Library)
-        if not Library then return end
-        local gui = Library.GUI
-        if not gui then return end
-        if Library.___AutoResetAttached then return end
-        Library.___AutoResetAttached = true
-
-        pcall(function() gui:SetAttribute("Fluent", true) end)
-
-        if gui.Destroying then
-            gui.Destroying:Connect(function() _resetAllToggles_NoSave(Library) end)
-        end
-        gui.AncestryChanged:Connect(function(_, parent)
-            if parent == nil then _resetAllToggles_NoSave(Library) end
+   local function safeReset(Library)
+    local SM = rawget(getgenv(), "SaveManager")
+    if SM and type(SM) == "table" then
+        SM._suppressSave = true
+        task.defer(function()
+            SM._suppressSave = false
         end)
     end
+    _resetAllToggles_NoSave(Library)
+end
+
+if gui.Destroying then
+    gui.Destroying:Connect(function()
+        safeReset(Library)
+    end)
+end
+gui.AncestryChanged:Connect(function(_, parent)
+    if parent == nil then
+        safeReset(Library)
+    end
+end)
 
     -- ========= InterfaceManager core =========
     function InterfaceManager:SetFolder(folder)

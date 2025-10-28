@@ -1,18 +1,20 @@
--- SaveManager.lua
+-- SaveManager.lua111
 local HttpService = game:GetService("HttpService")
 
 local SaveManager = {} do
+    -- === cấu hình mặc định ===
     SaveManager.Folder = "FluentScriptHub/specific-game"
-    SaveManager.FileName = "autosave.json"
-    SaveManager.SettingsFile = "options.json"
+    SaveManager.FileName = "autosave.json"            -- lưu options/toggles/dropdowns/inputs/sliders
+    SaveManager.SettingsFile = "options.json"         -- lưu interface settings (theme, keybind...) nếu dùng
 
     SaveManager.Library = nil
-    SaveManager.Options = {}
+    SaveManager.Options = {}      -- cache đã load
     SaveManager.Settings = {}
     SaveManager.IgnoreTheme = true
     SaveManager.IgnoreIndexes = {}
-    SaveManager._suppressSave = false
+    SaveManager._suppressSave = false   -- bị bật tạm thời bởi InterfaceManager khi destroy GUI
 
+    -- === helpers ===
     local function ensureFolders(self)
         local base = self.Folder
         local paths = {
@@ -24,11 +26,46 @@ local SaveManager = {} do
         end
     end
 
-    local function optionsPath(self) return self.Folder .. "/" .. self.FileName end
+    local function optionsPath(self)  return self.Folder .. "/" .. self.FileName end
     local function settingsPath(self) return self.Folder .. "/settings/" .. self.SettingsFile end
 
+    local function isSavableFlag(flag)
+        if typeof(flag) ~= "table" then return false end
+        -- các kiểu phần tử phổ biến của Fluent
+        local t = string.lower(tostring(flag.Type or ""))
+        return t == "toggle" or t == "dropdown" or t == "multidropdown"
+            or t == "input" or t == "slider" or t == "colorpicker"
+            or t == "keybind" or t == "checkbox" or t == "switch"
+    end
+
+    local function getFlagValue(flag)
+        -- Chuẩn… đa số flag có .Value
+        local v = rawget(flag, "Value")
+        -- MultiDropdown có thể là table; cứ trả nguyên để JSON encode
+        return v
+    end
+
+    local function setFlagValue(flag, value)
+        if typeof(flag) == "table" then
+            if typeof(flag.SetValue) == "function" then
+                local ok = pcall(function() flag:SetValue(value) end)
+                if ok then return true end
+            end
+            -- fallback nếu không có SetValue
+            if rawget(flag, "Value") ~= nil then
+                flag.Value = value
+                if typeof(flag.OnChanged) == "function" then
+                    pcall(function() flag:OnChanged() end)
+                end
+                return true
+            end
+        end
+        return false
+    end
+
+    -- === API ===
     function SaveManager:SetFolder(folder)
-        self.Folder = folder
+        self.Folder = tostring(folder or self.Folder)
         ensureFolders(self)
     end
 
@@ -44,19 +81,66 @@ local SaveManager = {} do
         self.IgnoreIndexes = t or {}
     end
 
-    -- no-op for compatibility with old scripts that call this
-    function SaveManager:_HookAllOptions()
-        if not self.Library or typeof(self.Library.Flags) ~= "table" then return end
-        for key, flag in pairs(self.Library.Flags) do
-            if typeof(flag)=="table" and typeof(flag.OnChanged)=="function" then
-                flag:OnChanged(function()
-                    if self._suppressSave then return end
-                    local val = rawget(flag,"Value")
-                    self.Options[key] = val
-                    self:Save()
-                end)
+    -- Gắn hook để auto-save khi flag thay đổi (kể cả flag xuất hiện sau)
+    local _watched = false
+    function SaveManager:_WatchFlags()
+        if _watched then return end
+        _watched = true
+
+        task.spawn(function()
+            local known = {} -- theo dõi flag đã hook
+            while true do
+                task.wait(0.25)
+                local lib = self.Library
+                local flags = lib and lib.Flags
+                if typeof(flags) == "table" then
+                    for key, flag in pairs(flags) do
+                        if isSavableFlag(flag) and not known[flag] then
+                            known[flag] = true
+                            -- hook OnChanged nếu có
+                            if typeof(flag.OnChanged) == "function" then
+                                local oldCb = flag.OnChanged
+                                flag.OnChanged = function(...)
+                                    -- gọi callback gốc trước
+                                    local ok, err = pcall(oldCb, ...)
+                                    if not ok then warn("SaveManager flag.OnChanged error:", err) end
+                                    -- sau đó save
+                                    if not self._suppressSave then
+                                        self.Options[key] = getFlagValue(flag)
+                                        self:Save()
+                                    end
+                                end
+                            end
+                            -- một số lib dùng :OnChanged(callback)
+                            if typeof(flag.OnChanged) == "function" and debug.getinfo(flag.OnChanged, "u").nparams == 1 then
+                                -- đã wrap ở trên
+                            elseif typeof(flag.OnChanged) == "function" and debug.getinfo(flag.OnChanged, "u").nparams > 1 then
+                                -- ignore
+                            elseif typeof(flag.OnChanged) ~= "function" and typeof(flag.SetValue) == "function" then
+                                -- nếu không có OnChanged tiêu chuẩn, ta tạo timer nhẹ để detect thay đổi
+                                local last = HttpService:JSONEncode(getFlagValue(flag))
+                                task.spawn(function()
+                                    while known[flag] do
+                                        task.wait(0.5)
+                                        local cur = HttpService:JSONEncode(getFlagValue(flag))
+                                        if cur ~= last and not self._suppressSave then
+                                            last = cur
+                                            self.Options[key] = getFlagValue(flag)
+                                            self:Save()
+                                        end
+                                    end
+                                end)
+                            end
+                        end
+                    end
+                end
             end
-        end
+        end)
+    end
+
+    -- tương thích với script cũ
+    function SaveManager:_HookAllOptions()
+        self:_WatchFlags()
     end
 
     function SaveManager:BuildConfigSection(tab)
@@ -71,10 +155,11 @@ local SaveManager = {} do
         ensureFolders(self)
         local data = {}
 
-        if self.Library and typeof(self.Library.Flags)=="table" then
-            for key, flag in pairs(self.Library.Flags) do
-                if self.IgnoreIndexes[key] ~= true then
-                    local v = rawget(flag, "Value")
+        local flags = self.Library and self.Library.Flags
+        if typeof(flags) == "table" then
+            for key, flag in pairs(flags) do
+                if self.IgnoreIndexes[key] ~= true and isSavableFlag(flag) then
+                    local v = getFlagValue(flag)
                     if v ~= nil then data[key] = v end
                 end
             end
@@ -87,24 +172,28 @@ local SaveManager = {} do
     function SaveManager:Load()
         ensureFolders(self)
         local p = optionsPath(self)
-        if isfile(p) then
-            local ok, decoded = pcall(function()
-                return HttpService:JSONDecode(readfile(p))
-            end)
-            if ok and type(decoded)=="table" then
-                self.Options = decoded
-                if self.Library and typeof(self.Library.Flags)=="table" then
-                    for key, val in pairs(decoded) do
-                        local flag = self.Library.Flags[key]
-                        if flag and typeof(flag.SetValue)=="function" then
-                            pcall(function() flag:SetValue(val) end)
-                        elseif flag then
-                            flag.Value = val
-                        end
-                    end
+        if not isfile(p) then return end
+
+        local ok, decoded = pcall(function()
+            return HttpService:JSONDecode(readfile(p))
+        end)
+        if not ok or type(decoded) ~= "table" then return end
+
+        self._suppressSave = true
+        self.Options = decoded
+
+        local flags = self.Library and self.Library.Flags
+        if typeof(flags) == "table" then
+            for key, val in pairs(decoded) do
+                local flag = flags[key]
+                if flag and isSavableFlag(flag) then
+                    pcall(setFlagValue, flag, val)
                 end
             end
         end
+
+        -- mở save lại sau khi load xong 1 frame
+        task.defer(function() self._suppressSave = false end)
     end
 
     function SaveManager:SaveSettings()
@@ -126,15 +215,15 @@ local SaveManager = {} do
         end
     end
 
-    -- compatibility helpers some scripts call:
+    -- entry points tiện dụng
     function SaveManager:LoadWithPriority(_autoload)
         self:LoadSettings()
         self:Load()
-        self:_HookAllOptions()
+        self:_WatchFlags()
     end
 
     function SaveManager:LoadAutoloadConfig()
-        -- kept for compatibility; no-op
+        -- tùy script cũ có dùng hay không, để no-op
     end
 end
 

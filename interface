@@ -1,4 +1,4 @@
--- InterfaceManager.lua
+-- InterfaceManager.lua 111
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -10,10 +10,9 @@ local InterfaceManager = {} do
         MenuKeybind = "LeftControl"
     }
 
-    -- ===== reset all toggles to false, but DO NOT write save files =====
+    -- ⚙️ Reset tất cả toggle về false nhưng không ghi file
     local function _resetAllToggles_NoSave(Library)
         if not Library then return end
-
         local SM = rawget(getgenv(), "SaveManager")
         if SM and type(SM)=="table" then SM._suppressSave = true end
 
@@ -41,30 +40,39 @@ local InterfaceManager = {} do
         end)
     end
 
+    -- ⚙️ Xóa các GUI Fluent cũ (rất an toàn, không đụng SettingsHub)
     local function _destroyOldGuis(excluding)
         local CoreGui = game:GetService("CoreGui")
         local roots = { CoreGui }
         local ok, ui = pcall(function() return gethui and gethui() end)
         if ok and typeof(ui)=="Instance" then table.insert(roots, ui) end
 
-        local function looksLikeFluent(inst)
+        local robloxGui = CoreGui:FindFirstChild("RobloxGui")
+        local function isSystemGui(inst)
+            return robloxGui and inst:IsDescendantOf(robloxGui)
+        end
+
+        local function isFluentGui(inst: Instance)
             if inst:GetAttribute("Fluent") == true then return true end
-            if inst:FindFirstChild("AcrylicPaint", true) then return true end
-            if inst:FindFirstChild("TopBar", true) and inst:FindFirstChild("Window", true) then return true end
-            return false
+            if inst.Name == "Fluent" or inst.Name == "FluentUI" then return true end
+            local hasAcrylic = inst:FindFirstChild("AcrylicPaint", true) ~= nil
+            local hasWindow  = inst:FindFirstChild("Window", true) ~= nil
+            local hasTabs    = inst:FindFirstChild("Tabs", true) ~= nil
+            return (hasAcrylic and hasWindow and hasTabs)
         end
 
         for _,root in ipairs(roots) do
             for _,g in ipairs(root:GetChildren()) do
-                if g ~= excluding and g:IsA("ScreenGui") and looksLikeFluent(g) then
+                if g ~= excluding and g:IsA("ScreenGui") and not isSystemGui(g) and isFluentGui(g) then
                     pcall(function() g:Destroy() end)
                 end
             end
             local btn = root:FindFirstChild("Meo_Button")
-            if btn and btn ~= excluding then pcall(function() btn:Destroy() end) end
+            if btn and btn ~= excluding and not isSystemGui(btn) then pcall(function() btn:Destroy() end) end
         end
     end
 
+    -- ⚙️ Tự reset toggle khi GUI bị xóa
     local function _attachAutoReset(Library)
         if not Library then return end
         local gui = Library.GUI
@@ -73,7 +81,6 @@ local InterfaceManager = {} do
         Library.___AutoResetAttached = true
 
         pcall(function() gui:SetAttribute("Fluent", true) end)
-
         if gui.Destroying then
             gui.Destroying:Connect(function() _resetAllToggles_NoSave(Library) end)
         end
@@ -81,8 +88,8 @@ local InterfaceManager = {} do
             if parent == nil then _resetAllToggles_NoSave(Library) end
         end)
     end
-    -- ====================================
 
+    -- ========= InterfaceManager core =========
     function InterfaceManager:SetFolder(folder)
 		self.Folder = folder;
 		self:BuildFolderTree()
@@ -101,7 +108,6 @@ local InterfaceManager = {} do
         end
 
         _destroyOldGuis(library and library.GUI)
-
 		self.Library = library
         _attachAutoReset(library)
 	end
@@ -116,9 +122,7 @@ local InterfaceManager = {} do
 		table.insert(paths, self.Folder .. "/settings")
 		for i = 1, #paths do
 			local str = paths[i]
-			if not isfolder(str) then
-				makefolder(str)
-			end
+			if not isfolder(str) then makefolder(str) end
 		end
 	end
 
@@ -139,11 +143,11 @@ local InterfaceManager = {} do
         end
     end
 
+    -- ========= UI Section =========
     function InterfaceManager:BuildInterfaceSection(tab)
         assert(self.Library, "Must set InterfaceManager.Library")
 		local Library = self.Library
         local Settings = InterfaceManager.Settings
-
         InterfaceManager:LoadSettings()
 
 		local section = tab:AddSection("Interface")
@@ -161,7 +165,10 @@ local InterfaceManager = {} do
 		})
         InterfaceTheme:SetValue(Settings.Theme)
 
-		local MenuKeybind = section:AddKeybind("MenuKeybind", { Title = "Minimize Bind", Default = Settings.MenuKeybind })
+		local MenuKeybind = section:AddKeybind("MenuKeybind", {
+            Title = "Minimize Bind",
+            Default = Settings.MenuKeybind
+        })
 		MenuKeybind:OnChanged(function()
 			Settings.MenuKeybind = MenuKeybind.Value
             InterfaceManager:SaveSettings()

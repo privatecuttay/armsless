@@ -1,4 +1,4 @@
--- InterfaceManager.lua aaaa
+-- InterfaceManager.lua (fixed: no nil 'gui' access, safe reset on destroy, Meo button no-dup)
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -64,7 +64,7 @@ local InterfaceManager = {} do
         return nil
     end
 
-    -- ========= Meo Button helpers (chống trùng ở CoreGui & gethui, bám đời Fluent GUI) =========
+    -- ========= Meo Button helpers (chống trùng & bám đời Fluent GUI) =========
     local function _getUiRoots()
         local roots = { game:GetService("CoreGui") }
         local ok, ui = pcall(function() return gethui and gethui() end)
@@ -75,9 +75,7 @@ local InterfaceManager = {} do
     local function _findMeoButton()
         for _,root in ipairs(_getUiRoots()) do
             local g = root:FindFirstChild("Meo_Button")
-            if g and g:IsA("ScreenGui") then
-                return g
-            end
+            if g and g:IsA("ScreenGui") then return g end
         end
         return nil
     end
@@ -92,20 +90,18 @@ local InterfaceManager = {} do
     local function _ensureMeoButton(Settings, anchorGui)
         local existed = _findMeoButton()
         if existed then
-            -- Nếu đã tồn tại nhưng đang bám sai anchor, phá để tạo lại
-            local anchorObj = existed:FindFirstChild("Anchor") :: ObjectValue
+            local anchorObj = existed:FindFirstChild("Anchor")
             if anchorGui and (not anchorObj or anchorObj.Value ~= anchorGui) then
                 pcall(function() existed:Destroy() end)
                 existed = nil
             else
-                return -- đã có và đúng anchor → thôi
+                return
             end
         end
 
         local VIM = game:GetService("VirtualInputManager")
         local UIS = game:GetService("UserInputService")
         local TweenService = game:GetService("TweenService")
-
         local parent = _preferredRoot()
 
         local gui = Instance.new("ScreenGui")
@@ -115,7 +111,6 @@ local InterfaceManager = {} do
         gui.ResetOnSpawn = false
         gui.Parent = parent
 
-        -- Lưu anchor dưới dạng ObjectValue để nhận diện lần sau
         local anchorVal = Instance.new("ObjectValue")
         anchorVal.Name = "Anchor"
         anchorVal.Value = anchorGui
@@ -192,9 +187,11 @@ local InterfaceManager = {} do
 
         -- ✅ Ràng đời: khi Fluent GUI bị xóa → Meo_Button cũng xóa theo
         if anchorGui and anchorGui:IsA("Instance") then
-            anchorGui.Destroying:Connect(function()
-                if gui and gui.Parent then pcall(function() gui:Destroy() end) end
-            end)
+            if anchorGui.Destroying then
+                anchorGui.Destroying:Connect(function()
+                    if gui and gui.Parent then pcall(function() gui:Destroy() end) end
+                end)
+            end
             anchorGui.AncestryChanged:Connect(function(_, parent)
                 if parent == nil then
                     if gui and gui.Parent then pcall(function() gui:Destroy() end) end
@@ -203,27 +200,31 @@ local InterfaceManager = {} do
         end
     end
 
-   local function safeReset(Library)
-    local SM = rawget(getgenv(), "SaveManager")
-    if SM and type(SM) == "table" then
-        SM._suppressSave = true
-        task.defer(function()
-            SM._suppressSave = false
+    -- 🔗 Gắn auto-reset khi GUI bị xóa (FIX: không dùng biến 'gui' ngoài scope)
+    local function _attachAutoReset(Library)
+        if not Library then return end
+        local gui = Library.GUI
+        if not gui or Library.___AutoResetAttached then return end
+        Library.___AutoResetAttached = true
+
+        pcall(function() gui:SetAttribute("Fluent", true) end)
+
+        local function safeReset()
+            local SM = rawget(getgenv(), "SaveManager")
+            if SM and type(SM) == "table" then
+                SM._suppressSave = true
+                task.defer(function() SM._suppressSave = false end)
+            end
+            _resetAllToggles_NoSave(Library)
+        end
+
+        if gui.Destroying then
+            gui.Destroying:Connect(safeReset)
+        end
+        gui.AncestryChanged:Connect(function(_, parent)
+            if parent == nil then safeReset() end
         end)
     end
-    _resetAllToggles_NoSave(Library)
-end
-
-if gui.Destroying then
-    gui.Destroying:Connect(function()
-        safeReset(Library)
-    end)
-end
-gui.AncestryChanged:Connect(function(_, parent)
-    if parent == nil then
-        safeReset(Library)
-    end
-end)
 
     -- ========= InterfaceManager core =========
     function InterfaceManager:SetFolder(folder)

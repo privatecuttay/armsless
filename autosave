@@ -46,7 +46,6 @@ end
 local function safe_load_lua_file(path)
     if not isfile(path) then return false, "nofile" end
     local src = readfile(path)
-    -- Prefer loadstring for executor compatibility; strip byte order marks just in case
     src = src:gsub("^\239\187\191", "")
     local chunk, err = loadstring(src)
     if not chunk then return false, err end
@@ -235,7 +234,7 @@ local SaveManager = {} do
         local opts = self.Options or {}
         for idx, option in next, opts do
             if self.Ignore[idx] then goto continue end
-            local P = self.Parser[option and option.Type]  -- nil-safe
+            local P = self.Parser[option and option.Type]
             if P and P.Save then
                 local ok, obj = pcall(P.Save, idx, option)
                 if ok and type(obj) == "table" then
@@ -278,7 +277,7 @@ local SaveManager = {} do
                     elseif t == "Input" or t == "Slider" then
                         task.spawn(function() opt:SetValue(obj) end)
                     elseif t == "Dropdown" then
-                        task.spawn(function() opt:SetValue(obj) end) -- string/table
+                        task.spawn(function() opt:SetValue(obj) end)
                     elseif t == "Keybind" then
                         if type(obj) == "table" and (obj.key or obj.mode) then
                             task.spawn(function() opt:SetValue(obj.key, obj.mode) end)

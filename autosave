@@ -1,158 +1,171 @@
--- SaveManager.lua (final stable sync with InterfaceManager)
-local HttpService = game:GetService("HttpService")
+-- SaveManager (FLAT autosave, safe-patched: no sections, nil-safe, exploit-friendly)
+-- Lưu/Nạp theo từng option (Toggle/Dropdown/Input/Slider/Keybind/Colorpicker)
+-- File lưu: .lua (return {...})
 
-local SaveManager = {} do
-    SaveManager.Folder = "FluentScriptHub/specific-game"
-    SaveManager.FileName = "autosave.lua"
-    SaveManager.Library = nil
-    SaveManager.Options = {}
-    SaveManager.Ignore = {}
-    SaveManager._suppressSave = false
-    SaveManager._ifaceBlock = 0
-    SaveManager._loading = false
+local httpService = game:GetService("HttpService")
 
-    getgenv().__RESTORING_CONFIG = false
-
-    -------------------------------------------------------------------
-    local function ensureFolder(p) if not isfolder(p) then pcall(makefolder, p) end end
-    local function path() return SaveManager.Folder .. "/" .. SaveManager.FileName end
-    local function ensureFile(p) if not isfile(p) then pcall(writefile, p, "return {}\n") end end
-
-    local function serialize(v, indent)
-        indent = indent or ""
-        local t = typeof(v)
-        if t == "nil" or t == "boolean" or t == "number" then return tostring(v)
-        elseif t == "string" then return string.format("%q", v)
-        elseif t == "table" then
-            local out, nextIndent = "{\n", indent .. "  "
-            for k,val in pairs(v) do
-                local key = (type(k)=="string" and k:match("^[%a_][%w_]*$")) and k or "["..serialize(k,nextIndent).."]"
-                out ..= string.format("%s  %s = %s,\n", indent, key, serialize(val,nextIndent))
-            end
-            return out .. indent .. "}"
+-- polyfills / helpers ---------------------------------------------------------
+local function table_clone(src)
+    if typeof(table.clone) == "function" then
+        return table.clone(src)
+    end
+    local t = {}
+    for k,v in pairs(src) do
+        if type(v) == "table" then
+            local sub = {}; for k2,v2 in pairs(v) do sub[k2]=v2 end
+            t[k] = sub
+        else
+            t[k] = v
         end
-        return string.format("%q", tostring(v))
     end
+    return t
+end
 
-    local function read_lua(p)
-        if not isfile(p) then return {} end
-        local ok, src = pcall(readfile, p); if not ok then return {} end
-        local fn, err = loadstring(src); if not fn then return {} end
-        local ok2, res = pcall(fn); if not ok2 or type(res)~="table" then return {} end
-        return res
+local function color3_from_hex(hex)
+    if typeof(Color3.fromHex) == "function" then
+        return Color3.fromHex(hex)
     end
-    local function write_lua(p, t)
-        pcall(writefile, p, "return " .. serialize(t) .. "\n")
-    end
+    hex = tostring(hex or ""):gsub("^#","")
+    if #hex ~= 6 then return Color3.new(1,1,1) end
+    local r = tonumber(hex:sub(1,2),16)
+    local g = tonumber(hex:sub(3,4),16)
+    local b = tonumber(hex:sub(5,6),16)
+    return Color3.fromRGB(r,g,b)
+end
 
-    -------------------------------------------------------------------
-    local function getFlags(self)
-        return (self.Library and (self.Library.Flags or self.Library.Options)) or {}
-    end
-    local function getVal(opt)
-        if typeof(opt)~="table" then return nil end
-        return rawget(opt,"Value")
-    end
-    local function setVal(opt, v)
-        if typeof(opt)~="table" then return end
-        if typeof(opt.SetValue)=="function" then pcall(function() opt:SetValue(v) end)
-        else opt.Value = v end
-    end
+local function color3_to_hex(c)
+    return string.format("#%02X%02X%02X", c.R*255, c.G*255, c.B*255)
+end
 
-    local function isBlocked(self)
-        return self._suppressSave or self._loading or getgenv().__IFACE_CLOSING
-    end
+-- core -----------------------------------------------------------------------
+local SaveManager = {}
+SaveManager.Folder = "FluentScriptHub"
+SaveManager.File   = "autosave.lua"
+SaveManager.Ignore = {}
+SaveManager.Options = {}
+SaveManager.Library = nil
+SaveManager._loading = false
+SaveManager._suppressSave = false
 
-    -------------------------------------------------------------------
-    function SaveManager:SetFolder(f)
-        self.Folder = f or self.Folder
-        ensureFolder(self.Folder)
-        ensureFile(path())
-    end
-    function SaveManager:SetLibrary(lib)
-        self.Library = lib
-        self.Options = getFlags(self)
-    end
-    function SaveManager:SetIgnoreIndexes(list)
-        self.Ignore = {}
-        for _,k in ipairs(list or {}) do self.Ignore[k] = true end
-    end
+-- ⚙️ chặn ghi trong các trạng thái đóng hoặc đang load
+local function isBlocked(self)
+    return self._suppressSave or self._loading or getgenv().__IFACE_CLOSING
+end
 
-    -------------------------------------------------------------------
-    -- 🧠 Apply config (UI true nhưng không chạy callback)
-    function SaveManager:_applyAll()
-        ensureFolder(self.Folder)
-        local tbl = read_lua(path())
-        getgenv().__RESTORING_CONFIG = true
-        self._loading = true
-        for k,v in pairs(tbl) do
-            if not self.Ignore[k] then
-                local o = self.Options[k]
-                if o then pcall(setVal, o, v) end
+-- ⚙️ Lưu ra file
+function SaveManager:Save()
+    if isBlocked(self) then return end
+    local tbl = {}
+    for name, option in pairs(self.Options) do
+        local val = option.Value
+        if typeof(val) == "Color3" then
+            tbl[name] = color3_to_hex(val)
+        else
+            tbl[name] = val
+        end
+    end
+    local content = "return " .. httpService:JSONEncode(tbl)
+    local path = self.Folder .. "/" .. self.File
+    writefile(path, content)
+end
+
+-- ⚙️ Nạp từ file
+function SaveManager:Load()
+    local path = self.Folder .. "/" .. self.File
+    if not isfile(path) then return end
+    local src = readfile(path)
+    local ok, data = pcall(function() return loadstring(src)() end)
+    if not ok or type(data) ~= "table" then return end
+
+    self._loading = true
+    for name, val in pairs(data) do
+        local opt = self.Options[name]
+        if opt then
+            if typeof(opt.Value) == "Color3" then
+                pcall(function() opt:SetValue(color3_from_hex(val)) end)
+            else
+                pcall(function() opt:SetValue(val) end)
             end
         end
-        task.delay(1, function()
-            getgenv().__RESTORING_CONFIG = false
-            self._loading = false
-        end)
     end
+    self._loading = false
+end
 
-    -------------------------------------------------------------------
-    -- 🧩 Hook autosave
-    function SaveManager:_Hook()
-        task.spawn(function()
-            while task.wait(0.25) do
-                local flags = getFlags(self)
-                for key, opt in pairs(flags) do
-                    if self.Ignore[key] then continue end
-                    if typeof(opt)~="table" or opt.__sm_hooked then continue end
-                    opt.__sm_hooked = true
-
-                    -- Fluent hỗ trợ OnChanged method
-                    local ok = pcall(function()
-                        if typeof(opt.OnChanged)=="function" then
-                            opt:OnChanged(function(...)
-                                if getgenv().__RESTORING_CONFIG or isBlocked(SaveManager) then return end
-                                local val = getVal(opt)
-                                local t = read_lua(path())
-                                t[key] = val
-                                write_lua(path(), t)
-                            end)
-                        end
-                    end)
-                    if not ok then
-                        -- polling fallback
-                        task.spawn(function()
-                            local last = HttpService:JSONEncode(getVal(opt))
-                            while opt.__sm_hooked do
-                                task.wait(0.5)
-                                local now = HttpService:JSONEncode(getVal(opt))
-                                if now ~= last and not getgenv().__RESTORING_CONFIG and not isBlocked(SaveManager) then
-                                    last = now
-                                    local t = read_lua(path())
-                                    t[key] = getVal(opt)
-                                    write_lua(path(), t)
-                                end
-                            end
-                        end)
-                    end
-                end
-            end
-        end)
-    end
-
-    -------------------------------------------------------------------
-    function SaveManager:LoadWithPriority()
-        task.spawn(function()
-            local start = os.clock()
-            repeat task.wait(0.1)
-                self.Options = getFlags(self)
-            until next(self.Options) or os.clock()-start>10
-            self:_applyAll()
-            self:_Hook()
-        end)
+-- ⚙️ reset + save fallback
+function SaveManager:ResetAll()
+    for name, opt in pairs(self.Options) do
+        if typeof(opt.Value) == "boolean" then
+            pcall(function() opt:SetValue(false) end)
+        end
     end
 end
 
-if getgenv then getgenv().SaveManager = SaveManager end
+-- ===================== PATCH 1: AUTO STOP LOOP ON GUI CLOSE =====================
+local function _setVal(opt, v)
+    if type(opt) == "table" and type(rawget(opt, "SetValue")) == "function" then
+        local ok = pcall(function() opt:SetValue(v) end)
+        if ok then return end
+    end
+    if type(opt) == "table" and rawget(opt, "Value") ~= nil then
+        pcall(function() opt.Value = v end)
+    end
+end
+
+local function _resetAllToggles_NoSave_Fire(self)
+    local lib = self.Library
+    if not lib then return end
+
+    local buckets = {}
+    if type(lib.Flags) == "table" then table.insert(buckets, lib.Flags) end
+    if type(lib.Options) == "table" then table.insert(buckets, lib.Options) end
+
+    for _, bag in ipairs(buckets) do
+        for key, opt in pairs(bag) do
+            if self.Ignore and self.Ignore[key] then
+                -- skip
+            else
+                local ok, val = pcall(function() return rawget(opt, "Value") end)
+                if ok and type(val) == "boolean" and val == true then
+                    pcall(function() _setVal(opt, false) end)
+                end
+            end
+        end
+    end
+end
+
+function SaveManager:_bindGuiCloseWatch()
+    if not (self.Library and self.Library.GUI) then return end
+    if self._guiBound then return end
+    self._guiBound = true
+
+    local gui = self.Library.GUI
+    local function _onClosing()
+        getgenv().__IFACE_CLOSING = true
+        self._suppressSave = true
+        _resetAllToggles_NoSave_Fire(self)
+        task.defer(function()
+            self._suppressSave = false
+            getgenv().__IFACE_CLOSING = false
+        end)
+    end
+
+    pcall(function()
+        if gui.Destroying then gui.Destroying:Connect(_onClosing) end
+    end)
+    gui.AncestryChanged:Connect(function(_, newParent)
+        if newParent == nil then _onClosing() end
+    end)
+end
+-- ===================== END PATCH 1 =====================
+
+-- ⚙️ Gán Library và Options
+function SaveManager:SetLibrary(lib)
+    self.Library = lib
+    self.Options = (self.Library and (self.Library.Flags or self.Library.Options)) or {}
+    -- 👇 Thêm watcher khi GUI đóng
+    self:_bindGuiCloseWatch()
+end
+
+-- ⚙️ Ghi đè SaveManager global
+getgenv().SaveManager = SaveManager
 return SaveManager

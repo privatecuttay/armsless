@@ -1,10 +1,6 @@
--- SaveManager (FLAT autosave, safe-patched: no sections, nil-safe, exploit-friendly)
--- Lưu/Nạp theo từng option (Toggle/Dropdown/Input/Slider/Keybind/Colorpicker)
--- File lưu: .lua (return {...})
+local HttpService = game:GetService("HttpService")
 
-local httpService = game:GetService("HttpService")
-
--- polyfills / helpers ---------------------------------------------------------
+-- ========= polyfills / helpers =========
 local function table_clone(src)
     if typeof(table.clone) == "function" then
         return table.clone(src)
@@ -12,7 +8,7 @@ local function table_clone(src)
     local t = {}
     for k,v in pairs(src) do
         if type(v) == "table" then
-            local sub = {}; for k2,v2 in pairs(v) do sub[k2]=v2 end
+            local sub = {}; for k2,v2 in pairs(v) do sub[k2] = v2 end
             t[k] = sub
         else
             t[k] = v
@@ -27,80 +23,141 @@ local function color3_from_hex(hex)
     end
     hex = tostring(hex or ""):gsub("^#","")
     if #hex ~= 6 then return Color3.new(1,1,1) end
-    local r = tonumber(hex:sub(1,2),16)
-    local g = tonumber(hex:sub(3,4),16)
-    local b = tonumber(hex:sub(5,6),16)
+    local r = tonumber(hex:sub(1,2),16) or 255
+    local g = tonumber(hex:sub(3,4),16) or 255
+    local b = tonumber(hex:sub(5,6),16) or 255
     return Color3.fromRGB(r,g,b)
 end
 
-local function color3_to_hex(c)
-    return string.format("#%02X%02X%02X", c.R*255, c.G*255, c.B*255)
+-- ==== Lua serializer (write file .lua as return {...}) ====
+local function _lua_serialize(v)
+    local t = typeof(v)
+    if t == "string" then
+        return string.format("%q", v)
+    elseif t == "number" or t == "boolean" then
+        return tostring(v)
+    elseif t == "Color3" then
+        return string.format("{__color3=true,r=%d,g=%d,b=%d}", math.floor(v.R*255), math.floor(v.G*255), math.floor(v.B*255))
+    elseif t == "table" then
+        local parts = {}
+        for k, val in pairs(v) do
+            local key
+            if type(k)=="string" and k:match("^[%a_][%w_]*$") then
+                key = k .. "="
+            else
+                key = "[" .. _lua_serialize(k) .. "]="
+            end
+            table.insert(parts, key .. _lua_serialize(val))
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
+    else
+        return "nil"
+    end
 end
 
--- core -----------------------------------------------------------------------
+-- ========= core =========
 local SaveManager = {}
-SaveManager.Folder = "FluentScriptHub"
-SaveManager.File   = "autosave.lua"
-SaveManager.Ignore = {}
-SaveManager.Options = {}
-SaveManager.Library = nil
+SaveManager.Folder   = "FluentScriptHub"
+SaveManager.File     = "autosave.lua"
+SaveManager.Ignore   = {}    -- [name]=true to ignore option from autosave
+SaveManager.Options  = {}    -- ref to Library options/flags
+SaveManager.Library  = nil
 SaveManager._loading = false
 SaveManager._suppressSave = false
+SaveManager._guiBound = false
 
--- ⚙️ chặn ghi trong các trạng thái đóng hoặc đang load
+-- global guard flags (shared with Interface)
+getgenv().__IFACE_CLOSING = getgenv().__IFACE_CLOSING or false
+
+-- block writes during closing / loading / manual suppression
 local function isBlocked(self)
     return self._suppressSave or self._loading or getgenv().__IFACE_CLOSING
 end
 
--- ⚙️ Lưu ra file
+-- ========= Folder & file management =========
+function SaveManager:SetFolder(path)
+    self.Folder = tostring(path or "FluentScriptHub")
+    self.File   = self.File or "autosave.lua"
+
+    -- create nested folders safely: "a/b/c"
+    local function ensure_dirs(p)
+        local parts = {}
+        for seg in string.gmatch(p, "[^/\\]+") do table.insert(parts, seg) end
+        local acc = ""
+        for i,seg in ipairs(parts) do
+            acc = (i==1) and seg or (acc .. "/" .. seg)
+            if not isfolder(acc) then makefolder(acc) end
+        end
+    end
+    ensure_dirs(self.Folder)
+
+    -- create empty file if missing
+    local full = self.Folder .. "/" .. self.File
+    if not isfile(full) then
+        writefile(full, "return {}")
+    end
+end
+
+-- ========= Save / Load =========
 function SaveManager:Save()
     if isBlocked(self) then return end
     local tbl = {}
     for name, option in pairs(self.Options) do
-        local val = option.Value
-        if typeof(val) == "Color3" then
-            tbl[name] = color3_to_hex(val)
-        else
-            tbl[name] = val
+        if not (self.Ignore and self.Ignore[name]) then
+            tbl[name] = option.Value
         end
     end
-    local content = "return " .. httpService:JSONEncode(tbl)
-    local path = self.Folder .. "/" .. self.File
-    writefile(path, content)
+    local content = "return " .. _lua_serialize(tbl)
+    writefile(self.Folder .. "/" .. self.File, content)
 end
 
--- ⚙️ Nạp từ file
 function SaveManager:Load()
     local path = self.Folder .. "/" .. self.File
     if not isfile(path) then return end
+
     local src = readfile(path)
-    local ok, data = pcall(function() return loadstring(src)() end)
-    if not ok or type(data) ~= "table" then return end
+    local data
+
+    -- prefer Lua "return {...}"
+    do
+        local ok, ret = pcall(function() return loadstring(src)() end)
+        if ok and type(ret)=="table" then data = ret end
+    end
+
+    -- fallback: JSON (legacy)
+    if not data then
+        local okJ, obj = pcall(function() return HttpService:JSONDecode(src) end)
+        if okJ and type(obj)=="table" then data = obj end
+    end
+    if not data then return end
+
+    -- convert Color3 marker
+    for k,v in pairs(data) do
+        if type(v)=="table" and v.__color3 then
+            data[k] = Color3.fromRGB(tonumber(v.r) or 255, tonumber(v.g) or 255, tonumber(v.b) or 255)
+        end
+    end
 
     self._loading = true
     for name, val in pairs(data) do
         local opt = self.Options[name]
-        if opt then
-            if typeof(opt.Value) == "Color3" then
-                pcall(function() opt:SetValue(color3_from_hex(val)) end)
-            else
-                pcall(function() opt:SetValue(val) end)
-            end
+        if opt and not (self.Ignore and self.Ignore[name]) then
+            pcall(function() opt:SetValue(val) end)
         end
     end
     self._loading = false
 end
 
--- ⚙️ reset + save fallback
+-- quick helper if you want to zero all toggles (not used by load)
 function SaveManager:ResetAll()
     for name, opt in pairs(self.Options) do
-        if typeof(opt.Value) == "boolean" then
+        if typeof(opt.Value) == "boolean" and not (self.Ignore and self.Ignore[name]) then
             pcall(function() opt:SetValue(false) end)
         end
     end
 end
 
--- ===================== PATCH 1: AUTO STOP LOOP ON GUI CLOSE =====================
+-- ========= CLOSE WATCH: stop toggle loops on GUI destroy/close =========
 local function _setVal(opt, v)
     if type(opt) == "table" and type(rawget(opt, "SetValue")) == "function" then
         local ok = pcall(function() opt:SetValue(v) end)
@@ -121,12 +178,10 @@ local function _resetAllToggles_NoSave_Fire(self)
 
     for _, bag in ipairs(buckets) do
         for key, opt in pairs(bag) do
-            if self.Ignore and self.Ignore[key] then
-                -- skip
-            else
+            if not (self.Ignore and self.Ignore[key]) then
                 local ok, val = pcall(function() return rawget(opt, "Value") end)
                 if ok and type(val) == "boolean" and val == true then
-                    pcall(function() _setVal(opt, false) end)
+                    pcall(function() _setVal(opt, false) end) -- fire callbacks → loops exit
                 end
             end
         end
@@ -149,44 +204,78 @@ function SaveManager:_bindGuiCloseWatch()
         end)
     end
 
+    -- Destroying (if available)
     pcall(function()
         if gui.Destroying then gui.Destroying:Connect(_onClosing) end
     end)
+    -- Fallback: parent becomes nil → treat as closing
     gui.AncestryChanged:Connect(function(_, newParent)
         if newParent == nil then _onClosing() end
     end)
 end
--- ===================== END PATCH 1 =====================
-function SaveManager:SetFolder(path)
-    self.Folder = tostring(path or "FluentScriptHub")
-    self.File   = self.File or "autosave.lua"
 
-    -- tạo thư mục lồng nhau an toàn
-    local function ensure_dirs(p)
-        local parts = {}
-        for seg in string.gmatch(p, "[^/\\]+") do table.insert(parts, seg) end
-        local acc = ""
-        for i,seg in ipairs(parts) do
-            acc = (i==1) and seg or (acc .. "/" .. seg)
-            if not isfolder(acc) then makefolder(acc) end
+-- ========= AUTOSAVE HOOKS (save whenever an option changes) =========
+function SaveManager:_hookOption(opt)
+    -- Preferred: Fluent's OnChanged
+    if type(opt.OnChanged)=="function" then
+        opt:OnChanged(function()
+            if not isBlocked(self) then self:Save() end
+        end)
+        return
+    end
+    -- Some libraries expose .Changed (RBXScriptSignal-like)
+    if opt.Changed and typeof(opt.Changed)=="RBXScriptSignal" then
+        opt.Changed:Connect(function()
+            if not isBlocked(self) then self:Save() end
+        end)
+        return
+    end
+    -- Fallback: wrap existing Callback
+    if type(opt.Callback)=="function" then
+        local old = opt.Callback
+        opt.Callback = function(...)
+            local r = old(...)
+            if not isBlocked(self) then self:Save() end
+            return r
+        end
+        return
+    end
+    -- Final fallback: light polling
+    task.spawn(function()
+        local last = opt.Value
+        while opt and opt.Value ~= nil do
+            if opt.Value ~= last then
+                last = opt.Value
+                if not isBlocked(self) then self:Save() end
+            end
+            task.wait(0.25)
+        end
+    end)
+end
+
+function SaveManager:_hookAll()
+    local lib = self.Library
+    if not lib then return end
+    local bags = {}
+    if type(lib.Flags)=="table" then table.insert(bags, lib.Flags) end
+    if type(lib.Options)=="table" then table.insert(bags, lib.Options) end
+    for _,bag in ipairs(bags) do
+        for name,opt in pairs(bag) do
+            if not (self.Ignore and self.Ignore[name]) then
+                self:_hookOption(opt)
+            end
         end
     end
-    ensure_dirs(self.Folder)
-
-    -- nếu chưa có file, tạo file rỗng
-    local full = self.Folder .. "/" .. self.File
-    if not isfile(full) then
-        writefile(full, "return {}")
-    end
 end
--- ⚙️ Gán Library và Options
+
+-- ========= Wiring with Library =========
 function SaveManager:SetLibrary(lib)
     self.Library = lib
     self.Options = (self.Library and (self.Library.Flags or self.Library.Options)) or {}
-    -- 👇 Thêm watcher khi GUI đóng
-    self:_bindGuiCloseWatch()
+    self:_bindGuiCloseWatch()  -- ensure loops stop when GUI closes
+    self:_hookAll()            -- autosave when any option changes
 end
 
--- ⚙️ Ghi đè SaveManager global
+-- ========= export =========
 getgenv().SaveManager = SaveManager
 return SaveManager

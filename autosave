@@ -158,12 +158,25 @@ function SaveManager:_bindGuiCloseWatch()
 end
 -- ===================== END PATCH 1 =====================
 function SaveManager:SetFolder(path)
-    -- path: ví dụ "FluentScriptHub/specific-game"
     self.Folder = tostring(path or "FluentScriptHub")
+    self.File   = self.File or "autosave.lua"
 
-    -- Tạo folder nếu chưa tồn tại
-    if not isfolder(self.Folder) then
-        makefolder(self.Folder)
+    -- tạo thư mục lồng nhau an toàn
+    local function ensure_dirs(p)
+        local parts = {}
+        for seg in string.gmatch(p, "[^/\\]+") do table.insert(parts, seg) end
+        local acc = ""
+        for i,seg in ipairs(parts) do
+            acc = (i==1) and seg or (acc .. "/" .. seg)
+            if not isfolder(acc) then makefolder(acc) end
+        end
+    end
+    ensure_dirs(self.Folder)
+
+    -- nếu chưa có file, tạo file rỗng
+    local full = self.Folder .. "/" .. self.File
+    if not isfile(full) then
+        writefile(full, "return {}")
     end
 end
 -- ⚙️ Gán Library và Options

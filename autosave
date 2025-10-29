@@ -1,4 +1,4 @@
--- 🟦 SaveManager.lua 1
+-- SaveManager.lua (final stable sync with InterfaceManager)
 local HttpService = game:GetService("HttpService")
 
 local SaveManager = {} do
@@ -8,168 +8,149 @@ local SaveManager = {} do
     SaveManager.Options = {}
     SaveManager.Ignore = {}
     SaveManager._suppressSave = false
+    SaveManager._ifaceBlock = 0
+    SaveManager._loading = false
 
-    ---------------------------------------------------------------------
-    -- ⚙️ Helpers
-    local function ensureFolder(path)
-        if not isfolder(path) then
-            local ok, err = pcall(makefolder, path)
-            if not ok then warn("[SaveManager] makefolder failed:", err) end
-        end
-    end
+    getgenv().__RESTORING_CONFIG = false
 
-    local function autosavePath()
-        return SaveManager.Folder .. "/" .. SaveManager.FileName
-    end
+    -------------------------------------------------------------------
+    local function ensureFolder(p) if not isfolder(p) then pcall(makefolder, p) end end
+    local function path() return SaveManager.Folder .. "/" .. SaveManager.FileName end
+    local function ensureFile(p) if not isfile(p) then pcall(writefile, p, "return {}\n") end end
 
-    local function ensureFile(path)
-        if not isfile(path) then
-            pcall(writefile, path, "return {}\n")
-        end
-    end
-
-    local function serialize(val, indent)
+    local function serialize(v, indent)
         indent = indent or ""
-        local t = typeof(val)
-        if t == "nil" then return "nil"
-        elseif t == "boolean" or t == "number" then return tostring(val)
-        elseif t == "string" then return string.format("%q", val)
+        local t = typeof(v)
+        if t == "nil" or t == "boolean" or t == "number" then return tostring(v)
+        elseif t == "string" then return string.format("%q", v)
         elseif t == "table" then
-            local nextIndent = indent .. "  "
-            local out = "{\n"
-            for k,v in pairs(val) do
-                local key
-                if type(k) == "string" and k:match("^[%a_][%w_]*$") then
-                    key = k
-                else
-                    key = "[" .. serialize(k, nextIndent) .. "]"
-                end
-                out ..= string.format("%s  %s = %s,\n", indent, key, serialize(v, nextIndent))
+            local out, nextIndent = "{\n", indent .. "  "
+            for k,val in pairs(v) do
+                local key = (type(k)=="string" and k:match("^[%a_][%w_]*$")) and k or "["..serialize(k,nextIndent).."]"
+                out ..= string.format("%s  %s = %s,\n", indent, key, serialize(val,nextIndent))
             end
             return out .. indent .. "}"
         end
-        return string.format("%q", tostring(val))
+        return string.format("%q", tostring(v))
     end
 
-    local function read_lua_table(path)
-        if not isfile(path) then return {} end
-        local ok, src = pcall(readfile, path)
-        if not ok then return {} end
-        local fn, err = loadstring(src)
-        if not fn then warn("[SaveManager] parse autosave.lua failed:", err) return {} end
-        local ok2, res = pcall(fn)
-        if not ok2 or type(res) ~= "table" then return {} end
+    local function read_lua(p)
+        if not isfile(p) then return {} end
+        local ok, src = pcall(readfile, p); if not ok then return {} end
+        local fn, err = loadstring(src); if not fn then return {} end
+        local ok2, res = pcall(fn); if not ok2 or type(res)~="table" then return {} end
         return res
     end
+    local function write_lua(p, t)
+        pcall(writefile, p, "return " .. serialize(t) .. "\n")
+    end
 
-    local function write_lua_table(path, tbl)
-        local ok, err = pcall(writefile, path, "return " .. serialize(tbl) .. "\n")
-        if not ok then warn("[SaveManager] write autosave.lua failed:", err) end
+    -------------------------------------------------------------------
+    local function getFlags(self)
+        return (self.Library and (self.Library.Flags or self.Library.Options)) or {}
+    end
+    local function getVal(opt)
+        if typeof(opt)~="table" then return nil end
+        return rawget(opt,"Value")
+    end
+    local function setVal(opt, v)
+        if typeof(opt)~="table" then return end
+        if typeof(opt.SetValue)=="function" then pcall(function() opt:SetValue(v) end)
+        else opt.Value = v end
     end
 
     local function isBlocked(self)
-        return self._suppressSave or getgenv().__IFACE_CLOSING
+        return self._suppressSave or self._loading or getgenv().__IFACE_CLOSING
     end
 
-    ---------------------------------------------------------------------
-    -- 🧩 Public API
+    -------------------------------------------------------------------
+    function SaveManager:SetFolder(f)
+        self.Folder = f or self.Folder
+        ensureFolder(self.Folder)
+        ensureFile(path())
+    end
+    function SaveManager:SetLibrary(lib)
+        self.Library = lib
+        self.Options = getFlags(self)
+    end
     function SaveManager:SetIgnoreIndexes(list)
         self.Ignore = {}
         for _,k in ipairs(list or {}) do self.Ignore[k] = true end
     end
 
-    function SaveManager:SetFolder(folder)
-        self.Folder = folder or self.Folder
+    -------------------------------------------------------------------
+    -- 🧠 Apply config (UI true nhưng không chạy callback)
+    function SaveManager:_applyAll()
         ensureFolder(self.Folder)
-        ensureFile(autosavePath())
-    end
-
-    function SaveManager:SetLibrary(lib)
-        self.Library = lib
-        self.Options = (lib and (lib.Flags or lib.Options)) or {}
-    end
-
-    ---------------------------------------------------------------------
-    -- ⚙️ Core save/load
-    local function getValue(opt)
-        if typeof(opt) ~= "table" then return nil end
-        return rawget(opt, "Value")
-    end
-
-    local function setValue(opt, v)
-        if typeof(opt) ~= "table" then return end
-        if typeof(opt.SetValue) == "function" then
-            pcall(function() opt:SetValue(v) end)
-        else
-            opt.Value = v
+        local tbl = read_lua(path())
+        getgenv().__RESTORING_CONFIG = true
+        self._loading = true
+        for k,v in pairs(tbl) do
+            if not self.Ignore[k] then
+                local o = self.Options[k]
+                if o then pcall(setVal, o, v) end
+            end
         end
+        task.delay(1, function()
+            getgenv().__RESTORING_CONFIG = false
+            self._loading = false
+        end)
     end
 
-    function SaveManager:_readAll()
-        ensureFolder(self.Folder)
-        ensureFile(autosavePath())
-        return read_lua_table(autosavePath())
-    end
-
-    function SaveManager:_writeAll(tbl)
-        ensureFolder(self.Folder)
-        ensureFile(autosavePath())
-        write_lua_table(autosavePath(), tbl)
-    end
-
-    function SaveManager:_writeKey(key, val)
-        if isBlocked(self) then return end
-        if self.Ignore and self.Ignore[key] then return end
-        local tbl = self:_readAll()
-        tbl[key] = val
-        self:_writeAll(tbl)
-    end
-
-    ---------------------------------------------------------------------
-    -- 🔁 Hook autosave (OnChanged watcher)
-    function SaveManager:_HookAutosave()
+    -------------------------------------------------------------------
+    -- 🧩 Hook autosave
+    function SaveManager:_Hook()
         task.spawn(function()
             while task.wait(0.25) do
-                local flags = self.Library and (self.Library.Flags or self.Library.Options)
-                if type(flags) ~= "table" then continue end
+                local flags = getFlags(self)
                 for key, opt in pairs(flags) do
-                    if self.Ignore and self.Ignore[key] then continue end
-                    if typeof(opt) == "table" and typeof(opt.OnChanged) == "function" and not opt._hooked then
-                        opt._hooked = true
-                        local old = opt.OnChanged
-                        opt.OnChanged = function(...)
-                            local ok, err = pcall(old, ...)
-                            if not ok then warn("[SaveManager] OnChanged error:", err) end
-                            if isBlocked(SaveManager) then return end
-                            task.defer(function()
-                                SaveManager:_writeKey(key, getValue(opt))
+                    if self.Ignore[key] then continue end
+                    if typeof(opt)~="table" or opt.__sm_hooked then continue end
+                    opt.__sm_hooked = true
+
+                    -- Fluent hỗ trợ OnChanged method
+                    local ok = pcall(function()
+                        if typeof(opt.OnChanged)=="function" then
+                            opt:OnChanged(function(...)
+                                if getgenv().__RESTORING_CONFIG or isBlocked(SaveManager) then return end
+                                local val = getVal(opt)
+                                local t = read_lua(path())
+                                t[key] = val
+                                write_lua(path(), t)
                             end)
                         end
+                    end)
+                    if not ok then
+                        -- polling fallback
+                        task.spawn(function()
+                            local last = HttpService:JSONEncode(getVal(opt))
+                            while opt.__sm_hooked do
+                                task.wait(0.5)
+                                local now = HttpService:JSONEncode(getVal(opt))
+                                if now ~= last and not getgenv().__RESTORING_CONFIG and not isBlocked(SaveManager) then
+                                    last = now
+                                    local t = read_lua(path())
+                                    t[key] = getVal(opt)
+                                    write_lua(path(), t)
+                                end
+                            end
+                        end)
                     end
                 end
             end
         end)
     end
 
-    ---------------------------------------------------------------------
-    -- 🚀 Load autosave + apply UI
+    -------------------------------------------------------------------
     function SaveManager:LoadWithPriority()
-        local tbl = self:_readAll()
-        local opts = (self.Library and (self.Library.Flags or self.Library.Options)) or {}
-
-        -- Apply saved values to UI without triggering double saves
-        self._suppressSave = true
-        for key, val in pairs(tbl) do
-            if not (self.Ignore and self.Ignore[key]) then
-                local opt = opts[key]
-                if opt then pcall(setValue, opt, val) end
-            end
-        end
-        task.delay(0.2, function()
-            self._suppressSave = false
+        task.spawn(function()
+            local start = os.clock()
+            repeat task.wait(0.1)
+                self.Options = getFlags(self)
+            until next(self.Options) or os.clock()-start>10
+            self:_applyAll()
+            self:_Hook()
         end)
-
-        self:_HookAutosave()
     end
 end
 

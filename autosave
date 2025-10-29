@@ -1,22 +1,6 @@
 local HttpService = game:GetService("HttpService")
 
 -- ========= polyfills / helpers =========
-local function table_clone(src)
-    if typeof(table.clone) == "function" then
-        return table.clone(src)
-    end
-    local t = {}
-    for k,v in pairs(src) do
-        if type(v) == "table" then
-            local sub = {}; for k2,v2 in pairs(v) do sub[k2] = v2 end
-            t[k] = sub
-        else
-            t[k] = v
-        end
-    end
-    return t
-end
-
 local function color3_from_hex(hex)
     if typeof(Color3.fromHex) == "function" then
         return Color3.fromHex(hex)
@@ -59,14 +43,14 @@ end
 local SaveManager = {}
 SaveManager.Folder   = "FluentScriptHub"
 SaveManager.File     = "autosave.lua"
-SaveManager.Ignore   = {}    -- [name]=true to ignore option from autosave
-SaveManager.Options  = {}    -- ref to Library options/flags
+SaveManager.Ignore   = {}    -- [name]=true để bỏ qua option không muốn autosave
+SaveManager.Options  = {}    -- tham chiếu tới Library options/flags
 SaveManager.Library  = nil
 SaveManager._loading = false
 SaveManager._suppressSave = false
 SaveManager._guiBound = false
 
--- global guard flags (shared with Interface)
+-- global guard flags (dùng chung với Interface)
 getgenv().__IFACE_CLOSING = getgenv().__IFACE_CLOSING or false
 
 -- block writes during closing / loading / manual suppression
@@ -79,7 +63,7 @@ function SaveManager:SetFolder(path)
     self.Folder = tostring(path or "FluentScriptHub")
     self.File   = self.File or "autosave.lua"
 
-    -- create nested folders safely: "a/b/c"
+    -- tạo thư mục lồng nhau: "a/b/c"
     local function ensure_dirs(p)
         local parts = {}
         for seg in string.gmatch(p, "[^/\\]+") do table.insert(parts, seg) end
@@ -91,7 +75,7 @@ function SaveManager:SetFolder(path)
     end
     ensure_dirs(self.Folder)
 
-    -- create empty file if missing
+    -- tạo file rỗng nếu chưa có
     local full = self.Folder .. "/" .. self.File
     if not isfile(full) then
         writefile(full, "return {}")
@@ -118,13 +102,13 @@ function SaveManager:Load()
     local src = readfile(path)
     local data
 
-    -- prefer Lua "return {...}"
+    -- ưu tiên Lua "return {...}"
     do
         local ok, ret = pcall(function() return loadstring(src)() end)
         if ok and type(ret)=="table" then data = ret end
     end
 
-    -- fallback: JSON (legacy)
+    -- fallback: JSON cũ
     if not data then
         local okJ, obj = pcall(function() return HttpService:JSONDecode(src) end)
         if okJ and type(obj)=="table" then data = obj end
@@ -148,7 +132,7 @@ function SaveManager:Load()
     self._loading = false
 end
 
--- quick helper if you want to zero all toggles (not used by load)
+-- helper nếu cần reset thủ công
 function SaveManager:ResetAll()
     for name, opt in pairs(self.Options) do
         if typeof(opt.Value) == "boolean" and not (self.Ignore and self.Ignore[name]) then
@@ -204,11 +188,11 @@ function SaveManager:_bindGuiCloseWatch()
         end)
     end
 
-    -- Destroying (if available)
+    -- Destroying (nếu có)
     pcall(function()
         if gui.Destroying then gui.Destroying:Connect(_onClosing) end
     end)
-    -- Fallback: parent becomes nil → treat as closing
+    -- Fallback: parent=nil → xem như đóng
     gui.AncestryChanged:Connect(function(_, newParent)
         if newParent == nil then _onClosing() end
     end)
@@ -268,12 +252,38 @@ function SaveManager:_hookAll()
     end
 end
 
+-- ========= Delay helper: đợi Options build xong rồi mới Load =========
+function SaveManager:_whenOptionsReady(fn, timeout)
+    timeout = timeout or 5
+    task.spawn(function()
+        local t0 = os.clock()
+        while true do
+            local ready = false
+            local opts = self.Options or {}
+            for _ in pairs(opts) do ready = true break end
+            if ready then break end
+            if os.clock() - t0 > timeout then break end
+            task.wait(0.05)
+        end
+        pcall(fn)
+    end)
+end
+
 -- ========= Wiring with Library =========
 function SaveManager:SetLibrary(lib)
     self.Library = lib
     self.Options = (self.Library and (self.Library.Flags or self.Library.Options)) or {}
-    self:_bindGuiCloseWatch()  -- ensure loops stop when GUI closes
-    self:_hookAll()            -- autosave when any option changes
+
+    -- bind GUI-close watcher luôn
+    self:_bindGuiCloseWatch()
+
+    -- 🔑 CHỈ khi Options đã build xong mới Load + gắn autosave hooks
+    self:_whenOptionsReady(function()
+        -- Load trước (đang _loading → isBlocked() true → không ghi đè file)
+        self:Load()
+        -- Sau khi áp xong trạng thái từ file → bật autosave hooks
+        self:_hookAll()
+    end)
 end
 
 -- ========= export =========

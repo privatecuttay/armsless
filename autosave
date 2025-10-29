@@ -157,7 +157,15 @@ function SaveManager:_bindGuiCloseWatch()
     end)
 end
 -- ===================== END PATCH 1 =====================
+function SaveManager:SetFolder(path)
+    -- path: ví dụ "FluentScriptHub/specific-game"
+    self.Folder = tostring(path or "FluentScriptHub")
 
+    -- Tạo folder nếu chưa tồn tại
+    if not isfolder(self.Folder) then
+        makefolder(self.Folder)
+    end
+end
 -- ⚙️ Gán Library và Options
 function SaveManager:SetLibrary(lib)
     self.Library = lib

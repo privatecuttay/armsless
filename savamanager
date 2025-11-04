@@ -136,31 +136,30 @@ local SaveManager = {} do
 	end
 
 	function SaveManager:Save(name)
-		if (not name) then
-			return false, "no config file is selected"
-		end
+    if not name then
+        return false, "no config file is selected"
+    end
 
-		local fullPath = self.Folder .. "/settings/" .. name .. ".json"
+    -- sửa dòng này nếu không muốn folder 'settings'
+    -- local fullPath = self.Folder .. "/settings/" .. name .. ".json"
+    local fullPath = self.Folder .. "/" .. name .. ".json"
 
-		local data = {
-			objects = {}
-		}
+    local data = { objects = {} }
 
-		for idx, option in next, SaveManager.Options do
-			if not self.Parser[option.Type] then continue end
-			if self.Ignore[idx] then continue end
+    for idx, option in next, SaveManager.Options do
+        if not self.Parser[option.Type] then continue end
+        if self.Ignore[idx] then continue end
+        table.insert(data.objects, self.Parser[option.Type].Save(idx, option))
+    end
 
-			table.insert(data.objects, self.Parser[option.Type].Save(idx, option))
-		end	
+    local ok, encoded = pcall(httpService.JSONEncode, httpService, data)
+    if not ok then
+        return false, "failed to encode data"
+    end
 
-		local success, encoded = pcall(httpService.JSONEncode, httpService, data)
-		if not success then
-			return false, "failed to encode data"
-		end
-
-		writefile(fullPath, encoded)
-		return true
-	end
+    writefile(fullPath, encoded)
+    return true
+end
 
 	function SaveManager:Load(name)
 		if (not name) then

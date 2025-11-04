@@ -42,7 +42,7 @@ end
 -- ========= core =========
 local SaveManager = {}
 SaveManager.Folder   = "FluentScriptHub"
-SaveManager.File = username .. ".lua"
+SaveManager.File     = "autosave.lua"
 SaveManager.Ignore   = {}    -- [name]=true để bỏ qua option không muốn autosave
 SaveManager.Options  = {}    -- tham chiếu tới Library options/flags
 SaveManager.Library  = nil

@@ -42,7 +42,7 @@ end
 -- ========= core =========
 local SaveManager = {}
 SaveManager.Folder   = "FluentScriptHub"
-SaveManager.File     = "autosave.lua"
+SaveManager.File = username .. ".lua"
 SaveManager.Ignore   = {}    -- [name]=true để bỏ qua option không muốn autosave
 SaveManager.Options  = {}    -- tham chiếu tới Library options/flags
 SaveManager.Library  = nil
@@ -86,33 +86,11 @@ end
 function SaveManager:Save()
     if isBlocked(self) then return end
     local tbl = {}
-
     for name, option in pairs(self.Options) do
         if not (self.Ignore and self.Ignore[name]) then
-            local v = option.Value
-
-            -- ✅ Dropdown Multi: map {A=true,...} -> list {"A","B"}
-            if option.Type == "Dropdown" and option.Multi and typeof(v) == "table" then
-                local isMap = false
-                for k, val in pairs(v) do
-                    if type(k) == "string" and type(val) == "boolean" then
-                        isMap = true; break
-                    end
-                end
-                if isMap then
-                    local list = {}
-                    for key, on in pairs(v) do
-                        if on then table.insert(list, key) end
-                    end
-                    table.sort(list)
-                    v = list
-                end
-            end
-
-            tbl[name] = v
+            tbl[name] = option.Value
         end
     end
-
     local content = "return " .. _lua_serialize(tbl)
     writefile(self.Folder .. "/" .. self.File, content)
 end
@@ -124,22 +102,22 @@ function SaveManager:Load()
     local src = readfile(path)
     local data
 
-    -- Ưu tiên: Lua "return {...}"
+    -- ưu tiên Lua "return {...}"
     do
         local ok, ret = pcall(function() return loadstring(src)() end)
-        if ok and type(ret) == "table" then data = ret end
+        if ok and type(ret)=="table" then data = ret end
     end
 
-    -- Fallback: JSON cũ
+    -- fallback: JSON cũ
     if not data then
         local okJ, obj = pcall(function() return HttpService:JSONDecode(src) end)
-        if okJ and type(obj) == "table" then data = obj end
+        if okJ and type(obj)=="table" then data = obj end
     end
     if not data then return end
 
-    -- Convert marker Color3 (nếu có)
-    for k, v in pairs(data) do
-        if type(v) == "table" and v.__color3 then
+    -- convert Color3 marker
+    for k,v in pairs(data) do
+        if type(v)=="table" and v.__color3 then
             data[k] = Color3.fromRGB(tonumber(v.r) or 255, tonumber(v.g) or 255, tonumber(v.b) or 255)
         end
     end
@@ -148,25 +126,6 @@ function SaveManager:Load()
     for name, val in pairs(data) do
         local opt = self.Options[name]
         if opt and not (self.Ignore and self.Ignore[name]) then
-
-            -- ✅ Dropdown Multi: chấp nhận cả map và list, luôn SetValue(list)
-            if opt.Type == "Dropdown" and opt.Multi and typeof(val) == "table" then
-                local isMap = false
-                for k, v2 in pairs(val) do
-                    if type(k) == "string" and type(v2) == "boolean" then
-                        isMap = true; break
-                    end
-                end
-                if isMap then
-                    local list = {}
-                    for key, on in pairs(val) do
-                        if on then table.insert(list, key) end
-                    end
-                    table.sort(list)
-                    val = list
-                end
-            end
-
             pcall(function() opt:SetValue(val) end)
         end
     end

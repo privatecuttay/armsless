@@ -1,14 +1,3 @@
-
---[[
-Fluent_Full.txt (Single-file bundle)
-- Generated from the repo's /src directory.
-- SaveManager and InterfaceManager are intentionally NOT included.
-- Usage:
-    local Fluent = loadstring(readfile("Fluent_Full.txt"))()  -- or loadstring(the_string)()
-    local Window = Fluent:CreateWindow({ Title = "Meow by xal" })
-- The bundler provides an internal `require` that mirrors file paths from /src.
-]]]
-
 local __MODULES = {}
 local function __register(path, chunk)
     __MODULES[path] = chunk

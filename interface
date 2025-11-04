@@ -5,7 +5,7 @@ local InterfaceManager = {} do
     InterfaceManager.Folder = "FluentScriptHub"
     InterfaceManager.Settings = {
         Theme = "Dark",
-        Acrylic = true,
+        Acrylic = false,
         Transparency = true,
         MenuKeybind = "LeftControl",
     }

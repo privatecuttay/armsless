@@ -1,4 +1,3 @@
--- InterfaceManager.lua (final synced with SaveManager)
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -7,28 +6,98 @@ local InterfaceManager = {} do
         Theme = "Dark",
         Acrylic = true,
         Transparency = true,
-        MenuKeybind = "LeftControl"
+        MenuKeybind = "LeftControl",
     }
 
     ---------------------------------------------------------------------
-    -- 🧹 Destroy Fluent + Meo_Button nếu tồn tại
-    local function _destroyOldGui()
+    -- 🧹 Gracefully close any existing Fluent GUI (simulate normal "Close → Yes")
+    local function _gracefulCloseOldGui()
         local CoreGui = game:GetService("CoreGui")
-        for _, g in ipairs(CoreGui:GetChildren()) do
-            if g:IsA("ScreenGui") and (g.Name == "Fluent" or g:GetAttribute("Fluent")) then
-                pcall(function() g:Destroy() end)
+        local roots = { CoreGui, (gethui and gethui()) }
+
+        -- Mark as closing so SaveManager (old session) will suppress autosave
+        getgenv().__IFACE_CLOSING = true
+
+        local function tryClick(btn)
+            if not btn then return false end
+            local ok = false
+            -- Prefer firing existing callbacks via connections
+            pcall(function()
+                if getconnections then
+                    -- Try common signals
+                    local signals = {}
+                    if btn.MouseButton1Click then table.insert(signals, btn.MouseButton1Click) end
+                    if btn.Activated then table.insert(signals, btn.Activated) end
+                    for _, sig in ipairs(signals) do
+                        for _, con in ipairs(getconnections(sig)) do
+                            con:Fire()
+                            ok = true
+                        end
+                    end
+                end
+            end)
+            -- Fallback: Activate()
+            if not ok then
+                pcall(function() btn:Activate() ok = true end)
+            end
+            return ok
+        end
+
+        local function tryCloseWithDialog(g)
+            -- attempt to find a "close" button in common locations/names
+            local closeBtn = g:FindFirstChild("Close", true)
+                          or g:FindFirstChild("ButtonClose", true)
+                          or g:FindFirstChildWhichIsA("TextButton", true)
+
+            if not closeBtn then return false end
+            if not tryClick(closeBtn) then return false end
+
+            -- small delay to let the confirm dialog render
+            task.wait(0.05)
+
+            -- attempt to find a positive/confirm button
+            local yes
+            for _, name in ipairs({"Yes","Confirm","OK","Ok","Unload","Proceed"}) do
+                local found = g:FindFirstChild(name, true)
+                if found and found:IsA("TextButton") then yes = found break end
+            end
+            if yes then
+                tryClick(yes)
+                return true
+            end
+            return false
+        end
+
+        -- close every Fluent ScreenGui we can find
+        for _, root in ipairs(roots) do
+            if typeof(root) ~= "Instance" then continue end
+            for _, g in ipairs(root:GetChildren()) do
+                if g:IsA("ScreenGui") and (g.Name == "Fluent" or g:GetAttribute("Fluent")) then
+                    local closed = false
+                    pcall(function()
+                        closed = tryCloseWithDialog(g)
+                    end)
+                    if not closed then
+                        pcall(function() g:Destroy() end)
+                    end
+                end
             end
         end
-        for _, root in ipairs({CoreGui, gethui and gethui()}) do
-            if typeof(root)=="Instance" then
+
+        -- remove floating helper button if it exists
+        for _, root in ipairs(roots) do
+            if typeof(root) == "Instance" then
                 local mb = root:FindFirstChild("Meo_Button")
                 if mb then pcall(function() mb:Destroy() end) end
             end
         end
+
+        -- release the closing guard on the next tick (so new session is free)
+        task.defer(function() getgenv().__IFACE_CLOSING = false end)
     end
 
     ---------------------------------------------------------------------
-    -- 🐾 Meo Button
+    -- 🐾 Meo Button (floating Ctrl-square to toggle the menu keybind)
     local function _makeMeoButton(Settings, anchor)
         local VIM = game:GetService("VirtualInputManager")
         local UIS = game:GetService("UserInputService")
@@ -57,6 +126,7 @@ local InterfaceManager = {} do
         stroke.Thickness = 1
         stroke.Color = Color3.fromRGB(200, 150, 180)
 
+        -- drag
         local dragging, dragStart, startPos
         btn.InputBegan:Connect(function(i)
             if i.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -75,6 +145,7 @@ local InterfaceManager = {} do
             if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
         end)
 
+        -- bounce + simulate key
         local function bounce()
             local ti = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
             local to = TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
@@ -90,6 +161,7 @@ local InterfaceManager = {} do
             VIM:SendKeyEvent(false, key, false, game)
         end)
 
+        -- auto-destroy helper if anchor GUI is removed
         if anchor and anchor.Destroying then
             anchor.Destroying:Connect(function()
                 if gui then pcall(function() gui:Destroy() end) end
@@ -99,7 +171,7 @@ local InterfaceManager = {} do
 
     ---------------------------------------------------------------------
     function InterfaceManager:SetLibrary(lib)
-        _destroyOldGui()
+        _gracefulCloseOldGui()
         self.Library = lib
         pcall(function() lib.GUI:SetAttribute("Fluent", true) end)
         _makeMeoButton(self.Settings, lib.GUI)

@@ -1,4 +1,3 @@
---123
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -10,8 +9,6 @@ local InterfaceManager = {} do
         MenuKeybind = "LeftControl",
     }
 
-    ---------------------------------------------------------------------
-    -- 🧹 Close old GUI like manual close (handles acrylic removal)
     local function _destroyOldGui_likeManual()
         local CoreGui = game:GetService("CoreGui")
         local roots = { CoreGui, (gethui and gethui()) }
@@ -101,8 +98,6 @@ local InterfaceManager = {} do
         task.defer(function() getgenv().__IFACE_CLOSING = false end)
     end
 
-    ---------------------------------------------------------------------
-    -- 🐾 Meo Button (floating toggle)
     local function _makeMeoButton(Settings, anchor)
         local VIM = game:GetService("VirtualInputManager")
         local UIS = game:GetService("UserInputService")
@@ -171,7 +166,6 @@ local InterfaceManager = {} do
         end
     end
 
-    ---------------------------------------------------------------------
     function InterfaceManager:SetLibrary(lib)
         _destroyOldGui_likeManual()
         self.Library = lib
@@ -204,6 +198,35 @@ local InterfaceManager = {} do
             Settings.MenuKeybind = MenuKeybind.Value
         end)
         Library.MinimizeKeybind = MenuKeybind
+    end
+
+    function InterfaceManager:BuildHopServerSection(tab)
+        local section = tab:AddSection("Hop Server")
+
+        section:AddButton({
+            Title = "Rejoin Server",
+            Callback = function()
+                game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, game:GetService("Players").LocalPlayer)
+            end
+        })
+
+        section:AddButton({
+            Title = "Hop New Server",
+            Callback = function()
+                local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(game.PlaceId)
+                local ok, res = pcall(function()
+                    return game:HttpGet(url)
+                end)
+                if not ok then return end
+                local data = game:GetService("HttpService"):JSONDecode(res)
+                for _, v in ipairs(data.data or {}) do
+                    if v.playing < v.maxPlayers and v.id ~= game.JobId then
+                        game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, v.id, game:GetService("Players").LocalPlayer)
+                        break
+                    end
+                end
+            end
+        })
     end
 end
 

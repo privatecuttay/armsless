@@ -1,17 +1,4 @@
---1
---[[
-
-███████╗██╗░░░░░██╗░░░██╗███████╗███╗░░██╗████████╗  ██████╗░██╗░░░░░██╗░░░██╗░██████╗
-██╔════╝██║░░░░░██║░░░██║██╔════╝████╗░██║╚══██╔══╝  ██╔══██╗██║░░░░░██║░░░██║██╔════╝
-█████╗░░██║░░░░░██║░░░██║█████╗░░██╔██╗██║░░░██║░░░  ██████╔╝██║░░░░░██║░░░██║╚█████╗░
-██╔══╝░░██║░░░░░██║░░░██║██╔══╝░░██║╚████║░░░██║░░░  ██╔═══╝░██║░░░░░██║░░░██║░╚═══██╗
-██║░░░░░███████╗╚██████╔╝███████╗██║░╚███║░░░██║░░░  ██║░░░░░███████╗╚██████╔╝██████╔╝
-╚═╝░░░░░╚══════╝░╚═════╝░╚══════╝╚═╝░░╚══╝░░░╚═╝░░░  ╚═╝░░░░░╚══════╝░╚═════╝░╚═════╝░
-
-A modified version of Fluent
-https://fluent-pl.us
-
-]]
+--2
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -4140,11 +4127,18 @@ ElementsTable.Button = (function()
 
 		local ButtonFrame = Components.Element(Config.Title, Config.Description, self.Container, true, Config)
 
+		local title = ButtonFrame.Title
+		if title then
+			title.TextXAlignment = Enum.TextXAlignment.Center
+			title.Position = UDim2.new(0, 0, 0, 6)
+			title.Size = UDim2.new(1, 0, 0, 14)
+		end
+
 		local ButtonIco = New("ImageLabel", {
 			--Image = "rbxassetid://10709791437",
 			Size = UDim2.fromOffset(16, 16),
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.new(0.5, 0, 0.5, 0),
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -10, 0.5, 0),
 			BackgroundTransparency = 1,
 			Parent = ButtonFrame.Frame,
 			ThemeTag = { ImageColor3 = "Text" },

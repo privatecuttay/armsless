@@ -4127,7 +4127,7 @@ ElementsTable.Button = (function()
 
 		local ButtonFrame = Components.Element(Config.Title, Config.Description, self.Container, true, Config)
 
-		local title = ButtonFrame.Title
+		local title = ButtonFrame.TitleLabel
 		if title then
 			title.TextXAlignment = Enum.TextXAlignment.Center
 			title.TextYAlignment = Enum.TextYAlignment.Center

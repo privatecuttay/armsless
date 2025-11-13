@@ -1,4 +1,4 @@
---2
+--3
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -4130,8 +4130,10 @@ ElementsTable.Button = (function()
 		local title = ButtonFrame.Title
 		if title then
 			title.TextXAlignment = Enum.TextXAlignment.Center
-			title.Position = UDim2.new(0, 0, 0, 6)
-			title.Size = UDim2.new(1, 0, 0, 14)
+			title.TextYAlignment = Enum.TextYAlignment.Center
+			title.Position = UDim2.new(0, 0, 0, 0)
+			title.Size = UDim2.new(1, 0, 1, 0)
+			title.TextWrapped = false
 		end
 
 		local ButtonIco = New("ImageLabel", {

@@ -1,4 +1,4 @@
---seccbar
+--seccbar2
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")

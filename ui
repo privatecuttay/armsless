@@ -1,4 +1,4 @@
---6
+--7
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -2058,6 +2058,7 @@ Components.Section = (function()
     return function(Title, Parent, Icon)
         local Section = {}
 
+        -- Layout cho các Element bên trong Section
         Section.Layout = New("UIListLayout", {
             Padding = UDim.new(0, 5),
         })
@@ -2070,44 +2071,45 @@ Components.Section = (function()
             Section.Layout,
         })
 
+        -- HEADER
         local SectionHeader = New("Frame", {
             Size = UDim2.new(1, -16, 0, 22),
             Position = UDim2.fromOffset(0, 2),
             BackgroundTransparency = 1,
         }, {
-            New("UIListLayout", {
-                Padding = UDim.new(0, 5),
-                FillDirection = Enum.FillDirection.Horizontal,
-                SortOrder = Enum.SortOrder.LayoutOrder,
-                VerticalAlignment = Enum.VerticalAlignment.Center,
-            }),
-
+            -- Icon (nếu có)
             Icon and New("ImageLabel", {
                 Image = Icon,
                 Size = UDim2.fromOffset(16, 16),
                 BackgroundTransparency = 1,
-                LayoutOrder = 1,
-                ThemeTag = { ImageColor3 = "Text" },
+                AnchorPoint = Vector2.new(0, 0.5),
+                Position = UDim2.new(0, 8, 0.5, 0),
+                ThemeTag = {
+                    ImageColor3 = "Text",
+                },
+                Name = "Icon",
             }) or nil,
 
+            -- TITLE
             New("TextLabel", {
+                Name = "TitleLabel",
                 RichText = true,
                 Text = Title,
                 TextTransparency = 0,
-                FontFace = Font.new("rbxassetid://12187365364",
-                    Enum.FontWeight.SemiBold,
-                    Enum.FontStyle.Normal
-                ),
+                FontFace = Font.new("rbxassetid://12187365364", Enum.FontWeight.SemiBold, Enum.FontStyle.Normal),
                 TextSize = 18,
 
+                -- ✅ Căn giữa giống Button
                 TextXAlignment = Enum.TextXAlignment.Center,
                 TextYAlignment = Enum.TextYAlignment.Center,
 
-                Size = UDim2.new(1, 0, 1, 0),
+                Size = UDim2.new(1, 0, 0, 18),
+                Position = UDim2.new(0, 0, 0.5, -7),
                 BackgroundTransparency = 1,
-                LayoutOrder = 2,
 
-                ThemeTag = { TextColor3 = "Text" },
+                ThemeTag = {
+                    TextColor3 = "Text",
+                },
             }),
         })
 
@@ -2121,33 +2123,37 @@ Components.Section = (function()
             Section.Container,
         })
 
+        -- 🔶 LINE TRÊN
         local TopLine = New("Frame", {
             Size = UDim2.new(1, -16, 0, 1),
             Position = UDim2.new(0, 8, 0, 0),
             BackgroundTransparency = 0,
             BorderSizePixel = 0,
-            ThemeTag = { BackgroundColor3 = "ElementBorder" },
+            ThemeTag = {
+                BackgroundColor3 = "ElementBorder", -- đổi sang "Accent" nếu muốn màu nổi
+            },
             Parent = Section.Root,
         })
 
+        -- 🔶 LINE DƯỚI
         local BottomLine = New("Frame", {
             Size = UDim2.new(1, -16, 0, 1),
             Position = UDim2.new(0, 8, 1, -1),
             BackgroundTransparency = 0,
             BorderSizePixel = 0,
-            ThemeTag = { BackgroundColor3 = "ElementBorder" },
+            ThemeTag = {
+                BackgroundColor3 = "ElementBorder",
+            },
             Parent = Section.Root,
         })
 
-
-        --== AUTO SIZE UPDATE ==--
+        -- Auto resize theo content
         Creator.AddSignal(Section.Layout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
             Section.Container.Size = UDim2.new(1, 0, 0, Section.Layout.AbsoluteContentSize.Y)
             Section.Root.Size      = UDim2.new(1, 0, 0, Section.Layout.AbsoluteContentSize.Y + 25)
         end)
 
-
-        --== REGISTER ==--
+        -- Register vào window để highlight, search, v.v.
         if Library.Window and Library.Window.RegisterElement then
             Library.Window.RegisterElement(Section.Root, Title, "Section")
         elseif Library.Windows and #Library.Windows > 0 then
@@ -2160,6 +2166,7 @@ Components.Section = (function()
         return Section
     end
 end)()
+
 Components.Tab = (function()
 	local New = Creator.New
 	local Spring = Flipper.Spring.new

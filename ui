@@ -1,4 +1,4 @@
---9
+--10
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -6077,6 +6077,7 @@ NotificationModule:Init(GUI)
 local New = Creator.New
 
 local Icons = {
+	["lucide-Xal"] = "rbxassetid://116072339339658",
 	["lucide-accessibility"] = "rbxassetid://10709751939",
 	["lucide-activity"] = "rbxassetid://10709752035",
 	["lucide-air-vent"] = "rbxassetid://10709752131",

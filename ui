@@ -1,4 +1,4 @@
---10
+--11
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -4160,105 +4160,113 @@ ElementsTable.Button = (function()
 	return Element
 end)()
 ElementsTable.Toggle = (function()
-	local Element = {}
-	Element.__index = Element
-	Element.__type = "Toggle"
+    local Element = {}
+    Element.__index = Element
+    Element.__type = "Toggle"
 
-	function Element:New(Idx, Config)
-		assert(Config.Title, "Toggle - Missing Title")
+    function Element:New(Idx, Config)
+        assert(Config.Title, "Toggle - Missing Title")
 
-		local Toggle = {
-			Value = Config.Default or false,
-			Callback = Config.Callback or function(Value) end,
-			Type = "Toggle",
-		}
+        local Toggle = {
+            Value = Config.Default or false,
+            Callback = Config.Callback or function(Value) end,
+            Type = "Toggle",
+        }
 
-		local ToggleFrame = Components.Element(Config.Title, Config.Description, self.Container, true, Config)
-		ToggleFrame.DescLabel.Size = UDim2.new(1, -54, 0, 14)
+        local ToggleFrame = Components.Element(Config.Title, Config.Description, self.Container, true, Config)
+        ToggleFrame.DescLabel.Size = UDim2.new(1, -54, 0, 14)
 
-		Toggle.SetTitle = ToggleFrame.SetTitle
-		Toggle.SetDesc = ToggleFrame.SetDesc
-		Toggle.Visible = ToggleFrame.Visible
-		Toggle.Elements = ToggleFrame
+        Toggle.SetTitle = ToggleFrame.SetTitle
+        Toggle.SetDesc = ToggleFrame.SetDesc
+        Toggle.Visible = ToggleFrame.Visible
+        Toggle.Elements = ToggleFrame
 
-		local ToggleCircle = New("ImageLabel", {
-			AnchorPoint = Vector2.new(0, 0.5),
-			Size = UDim2.fromOffset(14, 14),
-			Position = UDim2.new(0, 2, 0.5, 0),
-			Image = "http://www.roblox.com/asset/?id=12266946128",
-			ImageTransparency = 0.5,
-			ThemeTag = {
-				ImageColor3 = "ToggleSlider",
-			},
-		})
+        local ToggleInner = New("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Size = UDim2.fromOffset(16, 16),
+            Position = UDim2.new(0.5, 0, 0.5, 0),
+            BackgroundTransparency = 1,
+            ThemeTag = {
+                BackgroundColor3 = "Accent",
+            },
+        }, {
+            New("UICorner", {
+                CornerRadius = UDim.new(0, 3),
+            }),
+        })
 
-		local ToggleBorder = New("UIStroke", {
-			Transparency = 0.5,
-			ThemeTag = {
-				Color = "ToggleSlider",
-			},
-		})
+        local ToggleBorder = New("UIStroke", {
+            Transparency = 0.4,
+            ThemeTag = {
+                Color = "ToggleSlider",
+            },
+        })
 
-		local ToggleSlider = New("Frame", {
-			Size = UDim2.fromOffset(36, 18),
-			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, -10, 0.5, 0),
-			Parent = ToggleFrame.Frame,
-			BackgroundTransparency = 1,
-			ThemeTag = {
-				BackgroundColor3 = "Accent",
-			},
-		}, {
-			New("UICorner", {
-				CornerRadius = UDim.new(0, 9),
-			}),
-			ToggleBorder,
-			ToggleCircle,
-		})
+        local ToggleSlider = New("Frame", {
+            Size = UDim2.fromOffset(24, 24),
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -10, 0.5, 0),
+            Parent = ToggleFrame.Frame,
+            BackgroundColor3 = Color3.fromRGB(30, 30, 30),
+            BackgroundTransparency = 0,
+            ThemeTag = {
+                BackgroundColor3 = "MainBackground",
+            },
+        }, {
+            New("UICorner", {
+                CornerRadius = UDim.new(0, 4),
+            }),
+            ToggleBorder,
+            ToggleInner,
+        })
 
-		function Toggle:OnChanged(Func)
-			Toggle.Changed = Func
-			Func(Toggle.Value)
-		end
+        function Toggle:OnChanged(Func)
+            Toggle.Changed = Func
+            Func(Toggle.Value)
+        end
 
-		function Toggle:SetValue(Value)
-			Value = not not Value
-			Toggle.Value = Value
+        function Toggle:SetValue(Value)
+            Value = not not Value
+            Toggle.Value = Value
 
-			Creator.OverrideTag(ToggleBorder, { Color = Toggle.Value and "Accent" or "ToggleSlider" })
-			Creator.OverrideTag(ToggleCircle, { ImageColor3 = Toggle.Value and "ToggleToggled" or "ToggleSlider" })
-			TweenService:Create(
-				ToggleCircle,
-				TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-				{ Position = UDim2.new(0, Toggle.Value and 19 or 2, 0.5, 0) }
-			):Play()
-			TweenService:Create(
-				ToggleSlider,
-				TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-				{ BackgroundTransparency = Toggle.Value and 0.45 or 1 }
-			):Play()
-			ToggleCircle.ImageTransparency = Toggle.Value and 0 or 0.5
+            Creator.OverrideTag(ToggleBorder, {
+                Color = Toggle.Value and "Accent" or "ToggleSlider",
+            })
 
-			Library:SafeCallback(Toggle.Callback, Toggle.Value)
-			Library:SafeCallback(Toggle.Changed, Toggle.Value)
-		end
+            local targetTransparency = Toggle.Value and 0 or 1
 
-		function Toggle:Destroy()
-			ToggleFrame:Destroy()
-			Library.Options[Idx] = nil
-		end
+            TweenService:Create(
+                ToggleInner,
+                TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { BackgroundTransparency = targetTransparency }
+            ):Play()
 
-		Creator.AddSignal(ToggleFrame.Frame.MouseButton1Click, function()
-			Toggle:SetValue(not Toggle.Value)
-		end)
+            TweenService:Create(
+                ToggleSlider,
+                TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { BackgroundTransparency = Toggle.Value and 0 or 0.2 }
+            ):Play()
 
-		Toggle:SetValue(Toggle.Value)
+            Library:SafeCallback(Toggle.Callback, Toggle.Value)
+            Library:SafeCallback(Toggle.Changed, Toggle.Value)
+        end
 
-		Library.Options[Idx] = Toggle
-		return Toggle
-	end
+        function Toggle:Destroy()
+            ToggleFrame:Destroy()
+            Library.Options[Idx] = nil
+        end
 
-	return Element
+        Creator.AddSignal(ToggleFrame.Frame.MouseButton1Click, function()
+            Toggle:SetValue(not Toggle.Value)
+        end)
+
+        Toggle:SetValue(Toggle.Value)
+
+        Library.Options[Idx] = Toggle
+        return Toggle
+    end
+
+    return Element
 end)()
 ElementsTable.Dropdown = (function()
 	local Element = {}

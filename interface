@@ -1,4 +1,4 @@
---123
+--1234
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -42,70 +42,80 @@ local InterfaceManager = {} do
     end
 
     local function _makeMeoButton(Settings, anchor)
-        local VIM = game:GetService("VirtualInputManager")
-        local UIS = game:GetService("UserInputService")
-        local TweenService = game:GetService("TweenService")
-        local Players = game:GetService("Players")
-        local LP = Players.LocalPlayer
-        local PlayerGui = LP and LP:WaitForChild("PlayerGui")
+    local VIM = game:GetService("VirtualInputManager")
+    local UIS = game:GetService("UserInputService")
+    local TweenService = game:GetService("TweenService")
+    local Players = game:GetService("Players")
+    local LP = Players.LocalPlayer
+    local PlayerGui = LP and LP:WaitForChild("PlayerGui")
 
-        local gui = Instance.new("ScreenGui")
-        gui.Name = "Meo_Button"
-        gui.IgnoreGuiInset = true
-        gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-        gui.ResetOnSpawn = false
-        gui.Parent = PlayerGui
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "Meo_Button"
+    gui.IgnoreGuiInset = true
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    gui.ResetOnSpawn = false
+    gui.Parent = PlayerGui
 
-        local btn = Instance.new("ImageButton")
-        btn.Name = "CtrlSquare"
-        btn.Size = UDim2.fromOffset(50, 50)
-        btn.AnchorPoint = Vector2.new(1, 1)
-        btn.Position = UDim2.new(1, -20, 1, -20)
-        btn.BackgroundColor3 = Color3.fromRGB(44, 44, 44)
-        btn.Image = "rbxassetid://116072339339658"
-        btn.ScaleType = Enum.ScaleType.Fit
-        btn.AutoButtonColor = true
-        btn.Parent = gui
-        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
-        local stroke = Instance.new("UIStroke", btn)
-        stroke.Thickness = 1
-        stroke.Color = Color3.fromRGB(200, 150, 180)
+    local btn = Instance.new("ImageButton")
+    btn.Name = "CtrlSquare"
+    btn.Size = UDim2.fromOffset(50, 50)
+    btn.AnchorPoint = Vector2.new(1, 1)
+    btn.Position = UDim2.new(1, -20, 1, -20)
 
-        local dragging, dragStart, startPos
-        btn.InputBegan:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true; dragStart = i.Position; startPos = btn.Position
-            end
-        end)
-        UIS.InputChanged:Connect(function(i)
-            if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
-                local d = i.Position - dragStart
-                btn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
-            end
-        end)
-        UIS.InputEnded:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-        end)
+    -- 🔥 Bên trong trong suốt
+    btn.BackgroundTransparency = 1
 
-        local function bounce()
-            local ti = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-            local to = TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-            TweenService:Create(btn, ti, {Size = UDim2.fromOffset(44,44)}):Play()
-            task.wait(0.08)
-            TweenService:Create(btn, to, {Size = UDim2.fromOffset(50,50)}):Play()
+    btn.Image = "rbxassetid://116072339339658"
+    btn.ScaleType = Enum.ScaleType.Fit
+    btn.AutoButtonColor = true
+    btn.Parent = gui
+
+    -- Bo góc
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
+
+    -- 🔥 Viền vàng nhạt
+    local stroke = Instance.new("UIStroke", btn)
+    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(250, 230, 150) -- vàng nhạt đẹp
+
+    local dragging, dragStart, startPos
+    btn.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true; dragStart = i.Position; startPos = btn.Position
         end
-        btn.MouseButton1Click:Connect(function()
-            bounce()
-            local key = Enum.KeyCode[Settings.MenuKeybind] or Enum.KeyCode.LeftControl
-            VIM:SendKeyEvent(true, key, false, game); task.wait(0.05); VIM:SendKeyEvent(false, key, false, game)
-        end)
-
-        if anchor and anchor.Destroying then
-            anchor.Destroying:Connect(function()
-                if gui then pcall(function() gui:Destroy() end) end
-            end)
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+            local d = i.Position - dragStart
+            btn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
         end
+    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+    end)
+
+    local function bounce()
+        local ti = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local to = TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        TweenService:Create(btn, ti, {Size = UDim2.fromOffset(44,44)}):Play()
+        task.wait(0.08)
+        TweenService:Create(btn, to, {Size = UDim2.fromOffset(50,50)}):Play()
     end
+
+    btn.MouseButton1Click:Connect(function()
+        bounce()
+        local key = Enum.KeyCode[Settings.MenuKeybind] or Enum.KeyCode.LeftControl
+        VIM:SendKeyEvent(true, key, false, game); task.wait(0.05); 
+        VIM:SendKeyEvent(false, key, false, game)
+    end)
+
+    if anchor and anchor.Destroying then
+        anchor.Destroying:Connect(function()
+            if gui then pcall(function() gui:Destroy() end) end
+        end)
+    end
+end
+
 
     function InterfaceManager:SetLibrary(lib)
         _destroyOldGui_likeManual()

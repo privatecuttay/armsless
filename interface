@@ -1,4 +1,4 @@
---re
+--reminimizer
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -41,96 +41,97 @@ local InterfaceManager = {} do
         task.defer(function() getgenv().__IFACE_CLOSING = false end)
     end
 
-    local function _makeMeoButton(Settings, anchor)
-    local UIS = game:GetService("UserInputService")
-    local TweenService = game:GetService("TweenService")
-    local Players = game:GetService("Players")
-    local LP = Players.LocalPlayer
-    local PlayerGui = LP and LP:WaitForChild("PlayerGui")
+        local function _makeMeoButton(Settings, anchor)
+        local UIS = game:GetService("UserInputService")
+        local TweenService = game:GetService("TweenService")
+        local Players = game:GetService("Players")
+        local LP = Players.LocalPlayer
+        local PlayerGui = LP and LP:WaitForChild("PlayerGui")
 
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "Meo_Button"
-    gui.IgnoreGuiInset = true
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-    gui.ResetOnSpawn = false
-    gui.Parent = PlayerGui
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "Meo_Button"
+        gui.IgnoreGuiInset = true
+        gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+        gui.ResetOnSpawn = false
+        gui.Parent = PlayerGui
 
-    local btn = Instance.new("ImageButton")
-    btn.Name = "CtrlSquare"
-    btn.Size = UDim2.fromOffset(50, 50)
-    btn.AnchorPoint = Vector2.new(1, 1)
-    btn.Position = UDim2.new(1, -20, 1, -20)
-    btn.BackgroundTransparency = 1
-    btn.Image = "rbxassetid://116072339339658"
-    btn.ScaleType = Enum.ScaleType.Fit
-    btn.AutoButtonColor = true
-    btn.Parent = gui
+        local btn = Instance.new("ImageButton")
+        btn.Name = "CtrlSquare"
+        btn.Size = UDim2.fromOffset(50, 50)
+        btn.AnchorPoint = Vector2.new(1, 1)
+        btn.Position = UDim2.new(1, -20, 1, -20)
 
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
+        btn.BackgroundTransparency = 1
+        btn.Image = "rbxassetid://116072339339658"
+        btn.ScaleType = Enum.ScaleType.Fit
+        btn.AutoButtonColor = true
+        btn.Parent = gui
 
-    local stroke = Instance.new("UIStroke", btn)
-    stroke.Thickness = 2
-    stroke.Color = Color3.fromRGB(250, 230, 150)
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
 
-    -- Drag
-    local dragging, dragStart, startPos
-    btn.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = i.Position
-            startPos = btn.Position
-        end
-    end)
-    UIS.InputChanged:Connect(function(i)
-        if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
-            local d = i.Position - dragStart
-            btn.Position = UDim2.new(
-                startPos.X.Scale,
-                startPos.X.Offset + d.X,
-                startPos.Y.Scale,
-                startPos.Y.Offset + d.Y
-            )
-        end
-    end)
-    UIS.InputEnded:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
+        local stroke = Instance.new("UIStroke", btn)
+        stroke.Thickness = 2
+        stroke.Color = Color3.fromRGB(250, 230, 150)
 
-    local function bounce()
-        local ti = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-        local to = TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-        TweenService:Create(btn, ti, { Size = UDim2.fromOffset(44, 44) }):Play()
-        task.wait(0.08)
-        TweenService:Create(btn, to, { Size = UDim2.fromOffset(50, 50) }):Play()
-    end
-
-    -- 🔻 CLICK = toggle Enabled của UI chính
-    btn.MouseButton1Click:Connect(function()
-        bounce()
-
-        -- anchor chính là lib.GUI được truyền từ SetLibrary
-        local rootGui = anchor
-        if not rootGui then
-            -- fallback: tìm ScreenGui Fluent
-            rootGui = PlayerGui:FindFirstChild("Fluent")
-        end
-
-        if rootGui and rootGui:IsA("ScreenGui") then
-            rootGui.Enabled = not rootGui.Enabled
-            -- optional: print trạng thái
-            -- print("Fluent UI:", rootGui.Enabled and "ON" or "OFF")
-        end
-    end)
-
-    if anchor and anchor.Destroying then
-        anchor.Destroying:Connect(function()
-            if gui then pcall(function() gui:Destroy() end) end
+        -- drag
+        local dragging, dragStart, startPos
+        btn.InputBegan:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+                dragStart = i.Position
+                startPos = btn.Position
+            end
         end)
-    end
-end
 
+        UIS.InputChanged:Connect(function(i)
+            if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+                local d = i.Position - dragStart
+                btn.Position = UDim2.new(
+                    startPos.X.Scale,
+                    startPos.X.Offset + d.X,
+                    startPos.Y.Scale,
+                    startPos.Y.Offset + d.Y
+                )
+            end
+        end)
+
+        UIS.InputEnded:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+            end
+        end)
+
+        local function bounce()
+            local ti = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+            local to = TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+            TweenService:Create(btn, ti, { Size = UDim2.fromOffset(44, 44) }):Play()
+            task.wait(0.08)
+            TweenService:Create(btn, to, { Size = UDim2.fromOffset(50, 50) }):Play()
+        end
+
+        -- 🔻 CLICK = dùng logic Minimizer: Window:Minimize()
+        btn.MouseButton1Click:Connect(function()
+            bounce()
+
+            -- InterfaceManager ở ngoài do chính module của bạn tạo
+            local lib = InterfaceManager and InterfaceManager.Library
+            if lib and lib.Window and lib.Window.Minimize then
+                lib.Window:Minimize()
+            else
+                -- fallback nhẹ (nếu vì lý do gì chưa có Window)
+                local rootGui = anchor or PlayerGui:FindFirstChild("Fluent")
+                if rootGui and rootGui:IsA("ScreenGui") then
+                    rootGui.Enabled = not rootGui.Enabled
+                end
+            end
+        end)
+
+        if anchor and anchor.Destroying then
+            anchor.Destroying:Connect(function()
+                if gui then pcall(function() gui:Destroy() end) end
+            end)
+        end
+    end
 
     function InterfaceManager:SetLibrary(lib)
         _destroyOldGui_likeManual()

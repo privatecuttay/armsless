@@ -1,4 +1,4 @@
---12345
+--fix button
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -7,8 +7,7 @@ local InterfaceManager = {} do
         Theme = "Dark",
         Acrylic = false,
         Transparency = true,
-        -- Lưu dạng string cho dễ serialize + dùng lại
-        MenuKeybind = "LeftControl",
+        MenuKeybind = "LeftControl", -- luôn là string
     }
 
     local function _destroyOldGui_likeManual()
@@ -74,21 +73,16 @@ local InterfaceManager = {} do
         btn.Size = UDim2.fromOffset(50, 50)
         btn.AnchorPoint = Vector2.new(1, 1)
         btn.Position = UDim2.new(1, -20, 1, -20)
-
-        -- Bên trong trong suốt
         btn.BackgroundTransparency = 1
-
         btn.Image = "rbxassetid://116072339339658"
         btn.ScaleType = Enum.ScaleType.Fit
         btn.AutoButtonColor = true
         btn.Parent = gui
 
-        -- Bo góc
         local corner = Instance.new("UICorner")
         corner.CornerRadius = UDim.new(0, 10)
         corner.Parent = btn
 
-        -- Viền vàng nhạt
         local stroke = Instance.new("UIStroke")
         stroke.Thickness = 2
         stroke.Color = Color3.fromRGB(250, 230, 150)
@@ -103,6 +97,7 @@ local InterfaceManager = {} do
                 startPos = btn.Position
             end
         end)
+
         UIS.InputChanged:Connect(function(i)
             if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
                 local d = i.Position - dragStart
@@ -114,6 +109,7 @@ local InterfaceManager = {} do
                 )
             end
         end)
+
         UIS.InputEnded:Connect(function(i)
             if i.UserInputType == Enum.UserInputType.MouseButton1 then
                 dragging = false
@@ -123,9 +119,9 @@ local InterfaceManager = {} do
         local function bounce()
             local ti = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
             local to = TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-            TweenService:Create(btn, ti, { Size = UDim2.fromOffset(44, 44) }):Play()
+            game:GetService("TweenService"):Create(btn, ti, { Size = UDim2.fromOffset(44, 44) }):Play()
             task.wait(0.08)
-            TweenService:Create(btn, to, { Size = UDim2.fromOffset(50, 50) }):Play()
+            game:GetService("TweenService"):Create(btn, to, { Size = UDim2.fromOffset(50, 50) }):Play()
         end
 
         btn.MouseButton1Click:Connect(function()
@@ -134,7 +130,7 @@ local InterfaceManager = {} do
             local raw = Settings.MenuKeybind
             local key
 
-            -- raw có thể là EnumItem (trong lúc runtime) hoặc string (sau khi load config)
+            -- raw có thể là string hoặc EnumItem (tùy lúc load config)
             if typeof(raw) == "EnumItem" then
                 key = raw
             elseif type(raw) == "string" then
@@ -191,28 +187,18 @@ local InterfaceManager = {} do
             Settings.Theme = v
         end)
 
-        -- MenuKeybind
-        local defaultKey
-        if typeof(Settings.MenuKeybind) == "string" then
-            defaultKey = Enum.KeyCode[Settings.MenuKeybind] or Enum.KeyCode.LeftControl
-        elseif typeof(Settings.MenuKeybind) == "EnumItem" then
-            defaultKey = Settings.MenuKeybind
-        else
-            defaultKey = Enum.KeyCode.LeftControl
-        end
-
+        -- 🔑 MenuKeybind: Default dùng string như thư viện gốc
         local MenuKeybind = section:AddKeybind("MenuKeybind", {
             Title   = "Minimize Bind",
-            Default = defaultKey,
+            Default = Settings.MenuKeybind, -- string: "LeftControl", "F", ...
         })
 
         MenuKeybind:OnChanged(function()
             local v = MenuKeybind.Value
             if typeof(v) == "EnumItem" then
-                -- Lưu lại tên phím, ví dụ "F", "LeftControl"
-                Settings.MenuKeybind = v.Name
+                Settings.MenuKeybind = v.Name      -- lưu "F"
             else
-                Settings.MenuKeybind = tostring(v)
+                Settings.MenuKeybind = tostring(v) -- fallback
             end
         end)
 

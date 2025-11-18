@@ -1,4 +1,4 @@
---1234
+--re
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -7,12 +7,12 @@ local InterfaceManager = {} do
         Theme = "Dark",
         Acrylic = false,
         Transparency = true,
-        MenuKeybind = "LeftControl", -- luôn là string
+        MenuKeybind = "LeftControl",
     }
 
     local function _destroyOldGui_likeManual()
-        local Players   = game:GetService("Players")
-        local LP        = Players.LocalPlayer
+        local Players  = game:GetService("Players")
+        local LP       = Players.LocalPlayer
         local PlayerGui = LP and LP:FindFirstChildOfClass("PlayerGui")
 
         getgenv().__IFACE_CLOSING = true
@@ -24,184 +24,145 @@ local InterfaceManager = {} do
                         for _, d in ipairs(g:GetDescendants()) do
                             if d:IsA("Frame") or d:IsA("ImageLabel") then
                                 pcall(function()
-                                    if d.BackgroundTransparency ~= nil then
-                                        d.BackgroundTransparency = 1
-                                    end
-                                    if d:IsA("ImageLabel") and d.ImageTransparency ~= nil then
-                                        d.ImageTransparency = 1
-                                    end
+                                    if d.BackgroundTransparency then d.BackgroundTransparency = 1 end
+                                    if d:IsA("ImageLabel") and d.ImageTransparency ~= nil then d.ImageTransparency = 1 end
                                 end)
                             end
                         end
                     end)
-                    pcall(function()
-                        g:Destroy()
-                    end)
+                    pcall(function() g:Destroy() end)
                 end
             end
 
             local mb = PlayerGui:FindFirstChild("Meo_Button")
-            if mb then
-                pcall(function()
-                    mb:Destroy()
-                end)
-            end
+            if mb then pcall(function() mb:Destroy() end) end
         end
 
-        task.defer(function()
-            getgenv().__IFACE_CLOSING = false
-        end)
+        task.defer(function() getgenv().__IFACE_CLOSING = false end)
     end
 
     local function _makeMeoButton(Settings, anchor)
-        local VIM          = game:GetService("VirtualInputManager")
-        local UIS          = game:GetService("UserInputService")
-        local TweenService = game:GetService("TweenService")
-        local Players      = game:GetService("Players")
-        local LP           = Players.LocalPlayer
-        local PlayerGui    = LP and LP:WaitForChild("PlayerGui")
+    local UIS = game:GetService("UserInputService")
+    local TweenService = game:GetService("TweenService")
+    local Players = game:GetService("Players")
+    local LP = Players.LocalPlayer
+    local PlayerGui = LP and LP:WaitForChild("PlayerGui")
 
-        local gui = Instance.new("ScreenGui")
-        gui.Name = "Meo_Button"
-        gui.IgnoreGuiInset = true
-        gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-        gui.ResetOnSpawn = false
-        gui.Parent = PlayerGui
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "Meo_Button"
+    gui.IgnoreGuiInset = true
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    gui.ResetOnSpawn = false
+    gui.Parent = PlayerGui
 
-        local btn = Instance.new("ImageButton")
-        btn.Name = "CtrlSquare"
-        btn.Size = UDim2.fromOffset(50, 50)
-        btn.AnchorPoint = Vector2.new(1, 1)
-        btn.Position = UDim2.new(1, -20, 1, -20)
-        btn.BackgroundTransparency = 1
-        btn.Image = "rbxassetid://116072339339658"
-        btn.ScaleType = Enum.ScaleType.Fit
-        btn.AutoButtonColor = true
-        btn.Parent = gui
+    local btn = Instance.new("ImageButton")
+    btn.Name = "CtrlSquare"
+    btn.Size = UDim2.fromOffset(50, 50)
+    btn.AnchorPoint = Vector2.new(1, 1)
+    btn.Position = UDim2.new(1, -20, 1, -20)
+    btn.BackgroundTransparency = 1
+    btn.Image = "rbxassetid://116072339339658"
+    btn.ScaleType = Enum.ScaleType.Fit
+    btn.AutoButtonColor = true
+    btn.Parent = gui
 
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 10)
-        corner.Parent = btn
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
 
-        local stroke = Instance.new("UIStroke")
-        stroke.Thickness = 2
-        stroke.Color = Color3.fromRGB(250, 230, 150)
-        stroke.Parent = btn
+    local stroke = Instance.new("UIStroke", btn)
+    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(250, 230, 150)
 
-        -- Drag
-        local dragging, dragStart, startPos
-        btn.InputBegan:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-                dragStart = i.Position
-                startPos = btn.Position
-            end
-        end)
-
-        UIS.InputChanged:Connect(function(i)
-            if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
-                local d = i.Position - dragStart
-                btn.Position = UDim2.new(
-                    startPos.X.Scale,
-                    startPos.X.Offset + d.X,
-                    startPos.Y.Scale,
-                    startPos.Y.Offset + d.Y
-                )
-            end
-        end)
-
-        UIS.InputEnded:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = false
-            end
-        end)
-
-        local function bounce()
-            local ti = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-            local to = TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-            game:GetService("TweenService"):Create(btn, ti, { Size = UDim2.fromOffset(44, 44) }):Play()
-            task.wait(0.08)
-            game:GetService("TweenService"):Create(btn, to, { Size = UDim2.fromOffset(50, 50) }):Play()
+    -- Drag
+    local dragging, dragStart, startPos
+    btn.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = i.Position
+            startPos = btn.Position
         end
-
-        btn.MouseButton1Click:Connect(function()
-            bounce()
-
-            local raw = Settings.MenuKeybind
-            local key
-
-            -- raw có thể là string hoặc EnumItem (tùy lúc load config)
-            if typeof(raw) == "EnumItem" then
-                key = raw
-            elseif type(raw) == "string" then
-                key = Enum.KeyCode[raw] or Enum.KeyCode.LeftControl
-            else
-                key = Enum.KeyCode.LeftControl
-            end
-
-            VIM:SendKeyEvent(true, key, false, game)
-            task.wait(0.05)
-            VIM:SendKeyEvent(false, key, false, game)
-        end)
-
-        if anchor then
-            pcall(function()
-                anchor.Destroying:Connect(function()
-                    if gui then
-                        pcall(function()
-                            gui:Destroy()
-                        end)
-                    end
-                end)
-            end)
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+            local d = i.Position - dragStart
+            btn.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + d.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + d.Y
+            )
         end
+    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    local function bounce()
+        local ti = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local to = TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        TweenService:Create(btn, ti, { Size = UDim2.fromOffset(44, 44) }):Play()
+        task.wait(0.08)
+        TweenService:Create(btn, to, { Size = UDim2.fromOffset(50, 50) }):Play()
     end
+
+    -- 🔻 CLICK = toggle Enabled của UI chính
+    btn.MouseButton1Click:Connect(function()
+        bounce()
+
+        -- anchor chính là lib.GUI được truyền từ SetLibrary
+        local rootGui = anchor
+        if not rootGui then
+            -- fallback: tìm ScreenGui Fluent
+            rootGui = PlayerGui:FindFirstChild("Fluent")
+        end
+
+        if rootGui and rootGui:IsA("ScreenGui") then
+            rootGui.Enabled = not rootGui.Enabled
+            -- optional: print trạng thái
+            -- print("Fluent UI:", rootGui.Enabled and "ON" or "OFF")
+        end
+    end)
+
+    if anchor and anchor.Destroying then
+        anchor.Destroying:Connect(function()
+            if gui then pcall(function() gui:Destroy() end) end
+        end)
+    end
+end
+
 
     function InterfaceManager:SetLibrary(lib)
         _destroyOldGui_likeManual()
         self.Library = lib
-
-        pcall(function()
-            lib.GUI:SetAttribute("Fluent", true)
-        end)
-
+        pcall(function() lib.GUI:SetAttribute("Fluent", true) end)
         _makeMeoButton(self.Settings, lib.GUI)
         getgenv().__GUI_TOKEN = tostring(math.random(1e9))
     end
 
     function InterfaceManager:BuildInterfaceSection(tab)
-        local Library  = self.Library
+        local Library = self.Library
         local Settings = self.Settings
-        local section  = tab:AddSection("Interface")
+        local section = tab:AddSection("Interface")
 
-        -- Theme
         local theme = section:AddDropdown("InterfaceTheme", {
-            Title   = "Theme",
-            Values  = Library.Themes,
+            Title = "Theme",
+            Values = Library.Themes,
             Default = Settings.Theme,
+            Callback = function(v)
+                Library:SetTheme(v)
+                Settings.Theme = v
+            end
         })
         theme:SetValue(Settings.Theme)
 
-        theme:OnChanged(function(v)
-            Library:SetTheme(v)
-            Settings.Theme = v
-        end)
-
-        -- 🔑 MenuKeybind: Default dùng string như thư viện gốc
         local MenuKeybind = section:AddKeybind("MenuKeybind", {
-            Title   = "Minimize Bind",
-            Default = Settings.MenuKeybind, -- string: "LeftControl", "F", ...
+            Title = "Minimize Bind",
+            Default = Settings.MenuKeybind
         })
-
         MenuKeybind:OnChanged(function()
-            local v = MenuKeybind.Value
-            if typeof(v) == "EnumItem" then
-                Settings.MenuKeybind = v.Name      -- lưu "F"
-            else
-                Settings.MenuKeybind = tostring(v) -- fallback
-            end
+            Settings.MenuKeybind = MenuKeybind.Value
         end)
-
         Library.MinimizeKeybind = MenuKeybind
     end
 
@@ -211,35 +172,22 @@ local InterfaceManager = {} do
         section:AddButton({
             Title = "Rejoin Server",
             Callback = function()
-                local TeleportService = game:GetService("TeleportService")
-                local Players         = game:GetService("Players")
-                local LP              = Players.LocalPlayer
-
-                TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
+                game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, game:GetService("Players").LocalPlayer)
             end
         })
 
         section:AddButton({
             Title = "Hop New Server",
             Callback = function()
-                local placeId = game.PlaceId
-                local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(placeId)
-
+                local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(game.PlaceId)
                 local ok, res = pcall(function()
                     return game:HttpGet(url)
                 end)
                 if not ok then return end
-
                 local data = game:GetService("HttpService"):JSONDecode(res)
-                if not data or not data.data then return end
-
-                local TeleportService = game:GetService("TeleportService")
-                local Players         = game:GetService("Players")
-                local LP              = Players.LocalPlayer
-
-                for _, v in ipairs(data.data) do
+                for _, v in ipairs(data.data or {}) do
                     if v.playing < v.maxPlayers and v.id ~= game.JobId then
-                        TeleportService:TeleportToPlaceInstance(placeId, v.id, LP)
+                        game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, v.id, game:GetService("Players").LocalPlayer)
                         break
                     end
                 end

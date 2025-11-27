@@ -62,7 +62,7 @@ local InterfaceManager = {} do
         btn.Position = UDim2.new(1, -20, 1, -20)
 
         btn.BackgroundTransparency = 1
-        btn.Image = "rbxassetid://116072339339658"
+        btn.Image = "rbxassetid://75074343826264"
         btn.ScaleType = Enum.ScaleType.Fit
         btn.AutoButtonColor = true
         btn.Parent = gui

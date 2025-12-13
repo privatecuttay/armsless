@@ -1,4 +1,4 @@
---14
+--15
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -2112,17 +2112,17 @@ Components.Section = (function()
 			}),
 		})
 
-		-- Đường viền đen với hiệu ứng fade (giữa đậm, 2 bên mờ)
+		-- Đường viền trắng với hiệu ứng fade (giữa đậm, 2 bên mờ)
 		local UnderLine = New("Frame", {
 			Size = UDim2.new(1, 0, 0, 2),
 			Position = UDim2.new(0, 0, 0, 22),
 			BorderSizePixel = 0,
-			BackgroundColor3 = Color3.fromRGB(0, 0, 0), -- Màu đen
+			BackgroundColor3 = Color3.fromRGB(255, 255, 255), -- Màu trắng
 		}, {
 			New("UIGradient", {
 				Transparency = NumberSequence.new({
 					NumberSequenceKeypoint.new(0, 1),      -- Bên trái trong suốt
-					NumberSequenceKeypoint.new(0.5, 0),    -- Giữa đậm (đen đặc)
+					NumberSequenceKeypoint.new(0.5, 0),    -- Giữa đậm (trắng đặc)
 					NumberSequenceKeypoint.new(1, 1)       -- Bên phải trong suốt
 				}),
 				Rotation = 0, -- Ngang

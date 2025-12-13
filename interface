@@ -2,7 +2,7 @@
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
-    InterfaceManager.Folder = "FluentScriptHub"
+    InterfaceManager.Folder = "MeoXalSH"
     InterfaceManager.Settings = {
         Theme = "Dark",
         Acrylic = false,

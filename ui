@@ -1,4 +1,4 @@
---18.5
+--19
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -2627,7 +2627,7 @@ Components.Notification = (function()
 		-- Thay đổi vị trí từ góc dưới phải sang trên đầu giữa
 		Notification.Holder = New("Frame", {
 			Position = UDim2.new(0.5, 0, 0, 10), -- Giữa màn hình, cách top 10px (cao hơn)
-			Size = UDim2.new(0, 310, 0, 0), -- Chiều cao tự động
+			Size = UDim2.new(0, 220, 0, 0), -- Chiều rộng nhỏ hơn (220 thay vì 310)
 			AnchorPoint = Vector2.new(0.5, 0), -- Neo ở giữa trên
 			BackgroundTransparency = 1,
 			Parent = GUI,
@@ -2636,7 +2636,7 @@ Components.Notification = (function()
 				HorizontalAlignment = Enum.HorizontalAlignment.Center,
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				VerticalAlignment = Enum.VerticalAlignment.Top, -- Thay đổi từ Bottom sang Top
-				Padding = UDim.new(0, 20),
+				Padding = UDim.new(0, 10),
 			}),
 		})
 	end
@@ -2653,16 +2653,16 @@ Components.Notification = (function()
 		NewNotification.AcrylicPaint = Acrylic.AcrylicPaint()
 
 		NewNotification.Title = New("TextLabel", {
-			Position = UDim2.new(0, 14, 0, 17),
+			Position = UDim2.new(0, 10, 0, 10),
 			Text = Config.Title,
 			RichText = true,
 			TextColor3 = Color3.fromRGB(255, 255, 255),
 			TextTransparency = 0,
 			FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json"),
-			TextSize = 13,
+			TextSize = 12,
 			TextXAlignment = "Left",
 			TextYAlignment = "Center",
-			Size = UDim2.new(1, -12, 0, 12),
+			Size = UDim2.new(1, -10, 0, 12),
 			TextWrapped = true,
 			BackgroundTransparency = 1,
 			ThemeTag = {
@@ -2674,10 +2674,10 @@ Components.Notification = (function()
 			FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json"),
 			Text = Config.Content,
 			TextColor3 = Color3.fromRGB(240, 240, 240),
-			TextSize = 14,
+			TextSize = 11,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			AutomaticSize = Enum.AutomaticSize.Y,
-			Size = UDim2.new(1, 0, 0, 14),
+			Size = UDim2.new(1, 0, 0, 11),
 			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 			BackgroundTransparency = 1,
 			TextWrapped = true,
@@ -2690,10 +2690,10 @@ Components.Notification = (function()
 			FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json"),
 			Text = Config.SubContent,
 			TextColor3 = Color3.fromRGB(240, 240, 240),
-			TextSize = 14,
+			TextSize = 11,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			AutomaticSize = Enum.AutomaticSize.Y,
-			Size = UDim2.new(1, 0, 0, 14),
+			Size = UDim2.new(1, 0, 0, 11),
 			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 			BackgroundTransparency = 1,
 			TextWrapped = true,
@@ -2706,13 +2706,13 @@ Components.Notification = (function()
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(14, 40),
-			Size = UDim2.new(1, -28, 0, 0),
+			Position = UDim2.fromOffset(10, 28),
+			Size = UDim2.new(1, -20, 0, 0),
 		}, {
 			New("UIListLayout", {
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				VerticalAlignment = Enum.VerticalAlignment.Center,
-				Padding = UDim.new(0, 3),
+				Padding = UDim.new(0, 2),
 			}),
 			NewNotification.ContentLabel,
 			NewNotification.SubContentLabel,
@@ -2720,14 +2720,14 @@ Components.Notification = (function()
 
 		NewNotification.CloseButton = New("TextButton", {
 			Text = "",
-			Position = UDim2.new(1, -14, 0, 13),
-			Size = UDim2.fromOffset(20, 20),
+			Position = UDim2.new(1, -10, 0, 8),
+			Size = UDim2.fromOffset(16, 16),
 			AnchorPoint = Vector2.new(1, 0),
 			BackgroundTransparency = 1,
 		}, {
 			New("ImageLabel", {
 				Image = Components.Close,
-				Size = UDim2.fromOffset(16, 16),
+				Size = UDim2.fromOffset(14, 14),
 				Position = UDim2.fromScale(0.5, 0.5),
 				AnchorPoint = Vector2.new(0.5, 0.5),
 				BackgroundTransparency = 1,
@@ -2803,7 +2803,7 @@ Components.Notification = (function()
 
 		function NewNotification:Open()
 			local ContentSize = NewNotification.LabelHolder.AbsoluteSize.Y
-			NewNotification.Holder.Size = UDim2.new(1, 0, 0, 58 + ContentSize)
+			NewNotification.Holder.Size = UDim2.new(1, 0, 0, 42 + ContentSize)
 
 			-- Animation trượt xuống từ trên
 			RootMotor:setGoal({

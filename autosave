@@ -41,8 +41,8 @@ end
 
 -- ========= core =========
 local SaveManager = {}
-SaveManager.Folder   = "FluentScriptHub"
-SaveManager.File     = "autosave.lua"
+SaveManager.Folder   = "MeoXal"
+SaveManager.File     = "autosave.txt"
 SaveManager.Ignore   = {}    -- [name]=true để bỏ qua option không muốn autosave
 SaveManager.Options  = {}    -- tham chiếu tới Library options/flags
 SaveManager.Library  = nil
@@ -60,7 +60,7 @@ end
 
 -- ========= Folder & file management =========
 function SaveManager:SetFolder(path)
-    self.Folder = tostring(path or "FluentScriptHub")
+    self.Folder = tostring(path or "MeoXal")
     self.File   = self.File or "autosave.lua"
 
     -- tạo thư mục lồng nhau: "a/b/c"

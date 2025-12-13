@@ -1,4 +1,4 @@
---22.5
+--23
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -2706,7 +2706,7 @@ Components.Notification = (function()
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(14, 26),
+			Position = UDim2.fromOffset(14, 30),
 			Size = UDim2.new(1, -28, 0, 0),
 		}, {
 			New("UIListLayout", {

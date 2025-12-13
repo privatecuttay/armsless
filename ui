@@ -1,4 +1,4 @@
---16
+--17
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -2622,23 +2622,24 @@ Components.Notification = (function()
 	local Notification = {}
 
 	function Notification:Init(GUI)
-	Library.ActiveNotifications = Library.ActiveNotifications or {}
+		Library.ActiveNotifications = Library.ActiveNotifications or {}
 
-	Notification.Holder = New("Frame", {
-		Position = UDim2.new(0.5, 0, 0, 30), -- Giữa màn hình, phía trên
-		Size = UDim2.new(0, 310, 1, -30),
-		AnchorPoint = Vector2.new(0.5, 0), -- Neo giữa trên
-		BackgroundTransparency = 1,
-		Parent = GUI,
-	}, {
-		New("UIListLayout", {
-			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			VerticalAlignment = Enum.VerticalAlignment.Top, -- Căn trên
-			Padding = UDim.new(0, 10), -- Khoảng cách giữa các notification
-		}),
-	})
-end
+		-- Thay đổi vị trí từ góc dưới phải sang trên đầu giữa
+		Notification.Holder = New("Frame", {
+			Position = UDim2.new(0.5, 0, 0, 30), -- Giữa màn hình, cách top 30px
+			Size = UDim2.new(0, 310, 0, 0), -- Chiều cao tự động
+			AnchorPoint = Vector2.new(0.5, 0), -- Neo ở giữa trên
+			BackgroundTransparency = 1,
+			Parent = GUI,
+		}, {
+			New("UIListLayout", {
+				HorizontalAlignment = Enum.HorizontalAlignment.Center,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				VerticalAlignment = Enum.VerticalAlignment.Top, -- Thay đổi từ Bottom sang Top
+				Padding = UDim.new(0, 20),
+			}),
+		})
+	end
 
 	function Notification:New(Config)
 		Config.Title = Config.Title or "Title"
@@ -2736,10 +2737,11 @@ end
 			}),
 		})
 
+		-- Thay đổi vị trí ban đầu từ bên phải sang trên đầu
 		NewNotification.Root = New("Frame", {
 			BackgroundTransparency = 1,
 			Size = UDim2.new(1, 0, 1, 0),
-			Position = UDim2.fromScale(1, 0),
+			Position = UDim2.fromOffset(0, -60), -- Bắt đầu từ trên (ẩn)
 		}, {
 			NewNotification.AcrylicPaint.Frame,
 			NewNotification.Title,
@@ -2763,18 +2765,19 @@ end
 			NewNotification.Root,
 		})
 
+		-- Thay đổi motor để di chuyển theo trục Y thay vì X
 		local RootMotor = Flipper.GroupMotor.new({
-			Scale = 1,
-			Offset = 60,
+			YOffset = -60, -- Bắt đầu ở trên (ẩn)
 		})
 
 		RootMotor:onStep(function(Values)
-			NewNotification.Root.Position = UDim2.new(Values.Scale, Values.Offset, 0, 0)
+			NewNotification.Root.Position = UDim2.fromOffset(0, Values.YOffset)
 		end)
 
 		Creator.AddSignal(NewNotification.CloseButton.MouseButton1Click, function()
 			NewNotification:Close()
 		end)
+		
 		function NewNotification:ApplyTransparency()
 			if Library.Theme == "Glass" and Library.UseAcrylic then
 				local Value = Library.NotificationTransparency or 1
@@ -2802,9 +2805,9 @@ end
 			local ContentSize = NewNotification.LabelHolder.AbsoluteSize.Y
 			NewNotification.Holder.Size = UDim2.new(1, 0, 0, 58 + ContentSize)
 
+			-- Animation trượt xuống từ trên
 			RootMotor:setGoal({
-				Scale = Spring(0, { frequency = 5 }),
-				Offset = Spring(0, { frequency = 5 }),
+				YOffset = Spring(0, { frequency = 5 }), -- Trượt xuống vị trí 0
 			})
 
 			task.defer(function()
@@ -2825,9 +2828,9 @@ end
 				end
 
 				task.spawn(function()
+					-- Animation trượt lên trên khi đóng
 					RootMotor:setGoal({
-						Scale = Spring(1, { frequency = 5 }),
-						Offset = Spring(60, { frequency = 5 }),
+						YOffset = Spring(-60, { frequency = 5 }), -- Trượt lên trên
 					})
 					task.wait(0.4)
 					if Library.UseAcrylic then

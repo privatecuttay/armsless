@@ -1,4 +1,4 @@
---17
+--18
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -2626,7 +2626,7 @@ Components.Notification = (function()
 
 		-- Thay đổi vị trí từ góc dưới phải sang trên đầu giữa
 		Notification.Holder = New("Frame", {
-			Position = UDim2.new(0.5, 0, 0, 30), -- Giữa màn hình, cách top 30px
+			Position = UDim2.new(0.5, 0, 0, 10), -- Giữa màn hình, cách top 10px (cao hơn)
 			Size = UDim2.new(0, 310, 0, 0), -- Chiều cao tự động
 			AnchorPoint = Vector2.new(0.5, 0), -- Neo ở giữa trên
 			BackgroundTransparency = 1,

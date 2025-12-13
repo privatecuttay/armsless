@@ -4,7 +4,7 @@ local httpService = game:GetService("HttpService")
 local InterfaceManager = {} do
     InterfaceManager.Folder = "MeoXalSH"
     InterfaceManager.Settings = {
-        Theme = "Dark",
+        Theme = "Darker",
         Acrylic = false,
         Transparency = true,
         MenuKeybind = "LeftControl",
@@ -139,16 +139,16 @@ end
         local Settings = self.Settings
         local section = tab:AddSection("Interface")
 
-        local theme = section:AddDropdown("InterfaceTheme", {
-            Title = "Theme",
-            Values = Library.Themes,
-            Default = Settings.Theme,
-            Callback = function(v)
-                Library:SetTheme(v)
-                Settings.Theme = v
-            end
-        })
-        theme:SetValue(Settings.Theme)
+        -- local theme = section:AddDropdown("InterfaceTheme", {
+        --     Title = "Theme",
+        --     Values = Library.Themes,
+        --     Default = Settings.Theme,
+        --     Callback = function(v)
+        --         Library:SetTheme(v)
+        --         Settings.Theme = v
+        --     end
+        -- })
+        -- theme:SetValue(Settings.Theme)
 
         local MenuKeybind = section:AddKeybind("MenuKeybind", {
             Title = "Minimize Bind",

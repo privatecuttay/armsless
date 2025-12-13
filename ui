@@ -1,4 +1,4 @@
---9
+--12
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -2112,24 +2112,22 @@ Components.Section = (function()
 			}),
 		})
 
-		-- Đường viền vàng phía dưới
+		-- Đường viền vàng phía dưới (dùng màu Accent giống Toggle)
 		local UnderLine = New("Frame", {
 			Size = UDim2.new(1, 0, 0, 2),
 			Position = UDim2.new(0, 0, 0, 22),
-			BackgroundColor3 = Color3.fromRGB(255, 200, 0),
 			BorderSizePixel = 0,
+			ThemeTag = {
+				BackgroundColor3 = "Accent", -- Dùng màu Accent giống Toggle
+			},
 		})
 
 		Section.Root = New("Frame", {
-			BackgroundTransparency = 0.3, -- Nền đen hơn (0 = hoàn toàn đen, 1 = trong suốt)
-			BackgroundColor3 = Color3.fromRGB(15, 15, 15), -- Màu đen đậm
+			BackgroundTransparency = 1, -- Xóa nền, để trong suốt hoàn toàn
 			Size = UDim2.new(1, 0, 0, 26),
 			LayoutOrder = 7,
 			Parent = Parent,
 		}, {
-			New("UICorner", {
-				CornerRadius = UDim.new(0, 8),
-			}),
 			SectionHeader,
 			Section.Container,
 			UnderLine,

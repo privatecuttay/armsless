@@ -277,11 +277,9 @@ function SaveManager:SetLibrary(lib)
     -- bind GUI-close watcher luôn
     self:_bindGuiCloseWatch()
 
-    -- 🔑 CHỈ khi Options đã build xong mới Load + gắn autosave hooks
     self:_whenOptionsReady(function()
-        -- Load trước (đang _loading → isBlocked() true → không ghi đè file)
         self:Load()
-        -- Sau khi áp xong trạng thái từ file → bật autosave hooks
+        self:Save()
         self:_hookAll()
     end)
 end

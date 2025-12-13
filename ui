@@ -1,4 +1,4 @@
---20
+--20.5
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -2659,7 +2659,7 @@ Components.Notification = (function()
 			TextColor3 = Color3.fromRGB(255, 255, 255),
 			TextTransparency = 0,
 			FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json"),
-			TextSize = 13,
+			TextSize = 16,
 			TextXAlignment = "Center",
 			TextYAlignment = "Center",
 			Size = UDim2.new(1, -28, 0, 12),
@@ -2706,7 +2706,7 @@ Components.Notification = (function()
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(14, 26),
+			Position = UDim2.fromOffset(14, 30),
 			Size = UDim2.new(1, -28, 0, 0),
 		}, {
 			New("UIListLayout", {

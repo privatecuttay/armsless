@@ -1,4 +1,4 @@
---23
+--9
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -6998,7 +6998,7 @@ local SaveManager = {} do
 
 
 
-	SaveManager.Folder = "FluentSettings"
+	SaveManager.Folder = "MeoXalSM"
 
 
 	SaveManager.Ignore = {}
@@ -7967,7 +7967,7 @@ end
 local InterfaceManager = {} do
 
 
-	InterfaceManager.Folder = "FluentSettings"
+	InterfaceManager.Folder = "MeoXalIFM"
 
 
 	InterfaceManager.Settings = {

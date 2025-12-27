@@ -41,7 +41,7 @@ end
 
 -- ========= core =========
 local SaveManager = {}
-SaveManager.Folder   = "MeoXal"
+SaveManager.Folder   = "MeoXalSM"
 SaveManager.File     = "autosave.txt"
 SaveManager.Ignore   = {}    -- [name]=true để bỏ qua option không muốn autosave
 SaveManager.Options  = {}    -- tham chiếu tới Library options/flags

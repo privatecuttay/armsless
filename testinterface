@@ -1,4 +1,4 @@
---reminimizer
+--reminimizer1
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -145,9 +145,10 @@ function InterfaceManager:SetLibrary(lib)
             hide = lib.Options and lib.Options.HideUI and lib.Options.HideUI.Value
         end)
 
-        if hide and lib.GUI then
-            lib.GUI.Enabled = false
+        if hide and lib.Window and lib.Window.Minimize then
+            lib.Window:Minimize()
 
+            -- Notify
             if lib.Notify then
                 lib:Notify({
                     Title = "UI Notify",
@@ -158,6 +159,7 @@ function InterfaceManager:SetLibrary(lib)
         end
     end)
 end
+
 
 function InterfaceManager:BuildInterfaceSection(tab)
     local Library = self.Library
@@ -184,8 +186,8 @@ function InterfaceManager:BuildInterfaceSection(tab)
         if not HideUI.Value then return end
 
         local lib = InterfaceManager.Library
-        if lib and lib.GUI then
-            lib.GUI.Enabled = false
+        if lib and lib.Window and lib.Window.Minimize then
+            lib.Window:Minimize()
         end
     end)
 

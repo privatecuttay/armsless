@@ -179,7 +179,7 @@ function InterfaceManager:BuildInterfaceSection(tab)
 
     local HideUI = section:AddToggle("HideUI", {
         Title = "Hide UI on Start",
-        Default = false
+        Default = true
     })
 
     HideUI:OnChanged(function()

@@ -157,16 +157,10 @@ end
 
         HideUI:OnChanged(function()
             local lib = InterfaceManager.Library
-            if not lib then return end
+            if not lib or not lib.GUI then return end
 
-            if lib.Window and lib.Window.Minimize then
-                lib.Window:Minimize()
-                return
-            end
-
-            if lib.GUI then
-                lib.GUI.Enabled = not HideUI.Value
-            end
+            -- true = ẩn UI chính, Meo_Button không bị ảnh hưởng
+            lib.GUI.Enabled = not HideUI.Value
         end)
 
         local MenuKeybind = section:AddKeybind("MenuKeybind", {

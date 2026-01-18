@@ -1,4 +1,4 @@
---reminimizer1
+--reminimizer
 local httpService = game:GetService("HttpService")
 
 local InterfaceManager = {} do
@@ -140,26 +140,19 @@ function InterfaceManager:SetLibrary(lib)
     getgenv().__GUI_TOKEN = tostring(math.random(1e9))
 
     task.defer(function()
-        local hide = false
-        pcall(function()
-            hide = lib.Options and lib.Options.HideUI and lib.Options.HideUI.Value
-        end)
-
-        if hide and lib.Window and lib.Window.Minimize then
+        if lib.Window and lib.Window.Minimize then
             lib.Window:Minimize()
 
-            -- Notify
             if lib.Notify then
                 lib:Notify({
                     Title = "UI Notify",
-                    Content = "UI was hidden, press Left Ctrl to open",
+                    Content = "UI was hidden, press LeftCtrl to open",
                     Duration = 10
                 })
             end
         end
     end)
 end
-
 
 function InterfaceManager:BuildInterfaceSection(tab)
     local Library = self.Library
@@ -176,20 +169,6 @@ function InterfaceManager:BuildInterfaceSection(tab)
     --     end
     -- })
     -- theme:SetValue(Settings.Theme)
-
-    local HideUI = section:AddToggle("HideUI", {
-        Title = "Hide UI on Start",
-        Default = true
-    })
-
-    HideUI:OnChanged(function()
-        if not HideUI.Value then return end
-
-        local lib = InterfaceManager.Library
-        if lib and lib.Window and lib.Window.Minimize then
-            lib.Window:Minimize()
-        end
-    end)
 
     local MenuKeybind = section:AddKeybind("MenuKeybind", {
         Title = "Minimize Bind",
